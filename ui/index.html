@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevShell — Script Manager</title>
+    <meta name="description"
+        content="DevShell - A DevOps-style bash script manager with a premium UI for organizing and executing shell scripts.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- ─── Header ─────────────────────────────────────── -->
+    <header id="app-header">
+        <div class="header-left">
+            <div class="logo">
+                <svg class="logo-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m11 2-8 14h12l-3 6 9-15h-10z" />
+                </svg>
+                <h1>Dev<span class="accent">Shell</span></h1>
+            </div>
+            <span class="version-badge">v1.0</span>
+        </div>
+        <div class="header-center">
+            <div class="search-container" id="search-container">
+                <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8" />
+                    <path d="m21 21-4.3-4.3" />
+                </svg>
+                <input type="text" id="search-input" placeholder="Search scripts... (Ctrl+K)" autocomplete="off">
+                <kbd class="search-kbd">Ctrl+K</kbd>
+            </div>
+        </div>
+        <div class="header-right">
+            <button class="btn-icon" id="btn-refresh" title="Refresh Scripts">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- ─── Main Layout ────────────────────────────────── -->
+    <main id="app-main">
+        <!-- Left: Script Sidebar + CLI -->
+        <div id="left-panel">
+            <!-- Script Sidebar (narrow) -->
+            <aside id="sidebar">
+                <div class="sidebar-header">
+                    <div class="sidebar-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path
+                                d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                        </svg>
+                        <h2>Scripts</h2>
+                        <button class="btn-icon btn-add-script-small" id="btn-add-script" title="Add New Script"
+                            style="width: 20px; height: 20px; margin-left: auto;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path d="M5 12h14" />
+                                <path d="M12 5v14" />
+                            </svg>
+                        </button>
+                        <button class="btn-icon btn-add-script-small" id="btn-github-import" title="Import from GitHub"
+                            style="width: 20px; height: 20px; margin-left: 6px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path
+                                    d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+                                <path d="M9 18c-4.51 2-5-2-7-2" />
+                            </svg>
+                        </button>
+                    </div>
+                    <span class="script-count" id="script-count">0</span>
+                </div>
+
+                <!-- Favorites Section -->
+                <div class="sidebar-section" id="favorites-section" style="display:none;">
+                    <div class="section-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon
+                                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                        <span>Favorites</span>
+                    </div>
+                    <ul class="script-list" id="favorites-list"></ul>
+                </div>
+
+                <!-- Categories -->
+                <div class="sidebar-section" id="categories-section">
+                    <div id="category-tree"></div>
+                </div>
+            </aside>
+            <div class="resizer" id="resizer-left"></div>
+
+            <!-- CLI Terminal -->
+            <section id="cli-area">
+                <div class="cli-header">
+                    <div class="cli-tabs" id="cli-tabs">
+                        <div class="cli-tab active" data-id="1">
+                            <span class="cli-dots" style="margin-right: 6px;">
+                                <span class="dot dot-red"></span>
+                                <span class="dot dot-yellow"></span>
+                                <span class="dot dot-green"></span>
+                            </span>
+                            <span>Terminal 1</span>
+                            <button class="cli-tab-close" title="Close"
+                                onclick="event.stopPropagation(); closeTerminal(1)">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="M18 6 6 18" />
+                                    <path d="m6 6 12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <button class="btn-icon btn-add-tab" id="btn-add-tab" title="New Terminal">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path d="M5 12h14" />
+                                <path d="M12 5v14" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="cli-header-right">
+                        <div class="terminal-search-wrapper">
+                            <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.3-4.3"></path>
+                            </svg>
+                            <input type="text" id="cli-search-input" placeholder="Find... (Ctrl+F)" autocomplete="off">
+                            <span id="cli-search-results"></span>
+                        </div>
+                        <span class="run-status" id="run-status"></span>
+                        <button class="btn-icon btn-clear" id="btn-clear" title="Clear Terminal">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path d="M18 6 6 18" />
+                                <path d="m6 6 12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="cli-body" id="terminal-body">
+                    <div class="cli-welcome">
+                        <span class="cli-prompt">$</span> <span class="cli-welcome-text">Welcome to DevShell. Select a
+                            script to run, or type a command below.</span>
+                    </div>
+                </div>
+                <div class="cli-input-bar">
+                    <span class="cli-prompt-input">$</span>
+                    <input type="text" id="cli-input" placeholder="Type a command and press Enter..." autocomplete="off"
+                        spellcheck="false">
+                    <button class="btn btn-run-cmd" id="btn-run-cmd" title="Execute">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="9 10 4 15 9 20" />
+                            <path d="M20 4v7a4 4 0 0 1-4 4H4" />
+                        </svg>
+                    </button>
+                </div>
+            </section>
+        </div>
+        <div class="resizer" id="resizer-right"></div>
+
+        <!-- Right: Analysis Sidebar -->
+        <aside id="analysis-panel">
+            <!-- Empty / Welcome State -->
+            <div id="welcome-state" class="analysis-state">
+                <div class="analysis-empty">
+                    <div class="analysis-empty-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                            <line x1="3" x2="21" y1="9" y2="9" />
+                            <line x1="9" x2="9" y1="21" y2="9" />
+                        </svg>
+                    </div>
+                    <h3>Analysis Panel</h3>
+                    <p>Select a script to view details, source code, and execution metrics.</p>
+                    <div class="welcome-stats" id="welcome-stats"></div>
+                </div>
+            </div>
+
+            <!-- Locked State -->
+            <div id="locked-state" class="analysis-state" style="display:none;">
+                <div class="analysis-empty">
+                    <div class="analysis-empty-icon" style="color: var(--accent-orange);">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                    </div>
+                    <h3>Script Locked</h3>
+                    <p style="margin-bottom: 16px;">This script is password protected. Enter the password to view, edit,
+                        or execute.</p>
+                    <div class="form-group" style="width: 100%; max-width: 240px; margin: 0 auto; text-align: left;">
+                        <input type="password" id="unlock-password" placeholder="Enter password..." autocomplete="off">
+                        <button class="btn btn-save" id="btn-unlock" style="width: 100%; margin-top: 10px;">Unlock
+                            Script</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Script Detail View -->
+            <div id="script-detail" class="analysis-state" style="display:none;">
+                <!-- Script Info -->
+                <div class="analysis-section script-info-card">
+                    <div class="analysis-section-header">
+                        <div class="section-badge">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M12 16v-4" />
+                                <path d="M12 8h.01" />
+                            </svg>
+                            <span>Overview</span>
+                        </div>
+                        <button class="btn-icon btn-close-detail" id="btn-close-detail" title="Back to summary">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path d="M18 6 6 18" />
+                                <path d="m6 6 12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="script-info-body">
+                        <span class="script-category-badge" id="detail-category"></span>
+                        <h2 id="detail-name"></h2>
+                        <p id="detail-desc" class="script-description"></p>
+                        <div class="tag-list" id="detail-tags"></div>
+                        <div class="script-actions">
+                            <button class="btn btn-action" id="btn-lock" title="Change Lock Settings">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                </svg>
+                            </button>
+                            <button class="btn btn-action" id="btn-fav" title="Toggle Favorite">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <polygon
+                                        points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                                </svg>
+                            </button>
+                            <button class="btn btn-action" id="btn-edit" title="Edit Script">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                                    <path d="m15 5 4 4" />
+                                </svg>
+                                <span>Edit</span>
+                            </button>
+                            <button class="btn btn-action btn-danger" id="btn-delete" title="Delete Script">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="M3 6h18" />
+                                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                                    <line x1="10" x2="10" y1="11" y2="17" />
+                                    <line x1="14" x2="14" y1="11" y2="17" />
+                                </svg>
+                            </button>
+                            <button class="btn btn-run" id="btn-run" title="Run Script">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                </svg>
+                                <span>Run</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Source Code -->
+                <div class="analysis-section code-panel">
+                    <div class="analysis-section-header">
+                        <div class="section-badge">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path d="m18 16 4-4-4-4" />
+                                <path d="m6 8-4 4 4 4" />
+                                <path d="m14.5 4-5 16" />
+                            </svg>
+                            <span>Source Code</span>
+                        </div>
+                        <span class="file-path" id="detail-path"></span>
+                    </div>
+                    <pre class="code-block"><code id="detail-code"></code></pre>
+                </div>
+
+                <!-- Resource Monitor -->
+                <div class="analysis-section resource-panel" id="resource-panel" style="display:none;">
+                    <div class="analysis-section-header">
+                        <div class="section-badge">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path d="M3 3v18h18" />
+                                <rect width="4" height="7" x="7" y="10" rx="1" />
+                                <rect width="4" height="12" x="15" y="5" rx="1" />
+                            </svg>
+                            <span>Metrics</span>
+                        </div>
+                    </div>
+                    <div class="resource-grid" id="resource-grid">
+                        <div class="resource-card">
+                            <svg class="resource-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <polyline points="12 6 12 12 16 14" />
+                            </svg>
+                            <div class="resource-info">
+                                <div class="resource-label">Time</div>
+                                <div class="resource-value" id="res-time">—</div>
+                            </div>
+                        </div>
+                        <div class="resource-card">
+                            <svg class="resource-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m18 16 4-4-4-4" />
+                                <path d="m6 8-4 4 4 4" />
+                                <path d="m14.5 4-5 16" />
+                            </svg>
+                            <div class="resource-info">
+                                <div class="resource-label">Exit</div>
+                                <div class="resource-value" id="res-exit">—</div>
+                            </div>
+                        </div>
+                        <div class="resource-card">
+                            <svg class="resource-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <rect width="16" height="16" x="4" y="4" rx="2" />
+                                <rect width="6" height="6" x="9" y="9" rx="1" />
+                                <path d="M15 2v2" />
+                                <path d="M15 20v2" />
+                                <path d="M2 15h2" />
+                                <path d="M2 9h2" />
+                                <path d="M20 15h2" />
+                                <path d="M20 9h2" />
+                                <path d="M9 2v2" />
+                                <path d="M9 20v2" />
+                            </svg>
+                            <div class="resource-info">
+                                <div class="resource-label">CPU Usage</div>
+                                <div class="resource-value" id="res-cpu">—</div>
+                                <div class="resource-bar">
+                                    <div class="resource-bar-fill" id="res-cpu-bar"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="resource-card">
+                            <svg class="resource-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="22" x2="2" y1="12" y2="12" />
+                                <path
+                                    d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+                                <line x1="6" x2="6.01" y1="16" y2="16" />
+                                <line x1="10" x2="10.01" y1="16" y2="16" />
+                            </svg>
+                            <div class="resource-info">
+                                <div class="resource-label">Memory</div>
+                                <div class="resource-value" id="res-mem">—</div>
+                                <div class="resource-bar">
+                                    <div class="resource-bar-fill" id="res-mem-bar"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- ─── Add/Edit Modal ─────────────────────────────── -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal" id="script-modal">
+            <div class="modal-header">
+                <h2 id="modal-title">New Script</h2>
+                <button class="btn-icon" id="modal-close">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="modal-category">Category</label>
+                        <input type="text" id="modal-category" placeholder="e.g. docker, git, linux">
+                    </div>
+                    <div class="form-group">
+                        <label for="modal-filename">Filename</label>
+                        <input type="text" id="modal-filename" placeholder="e.g. my_script.sh">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="modal-editor">Script Content</label>
+                    <textarea id="modal-editor" spellcheck="false" placeholder="#!/bin/bash
+# name: My Script
+# desc: Description here
+# tag: category
+
+echo 'Hello World'"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" id="modal-cancel">Cancel</button>
+                <button class="btn btn-save" id="modal-save">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                        <polyline points="17 21 17 13 7 13 7 21" />
+                        <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                    Save Script
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="github-modal-overlay">
+        <div class="modal" id="github-modal">
+            <div class="modal-header">
+                <h2>Import from GitHub</h2>
+                <button class="btn-icon" id="github-modal-close">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="github-url">GitHub File URL (Raw or Blob)</label>
+                    <input type="text" id="github-url" placeholder="https://github.com/user/repo/blob/main/script.sh">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="github-category">Category</label>
+                        <input type="text" id="github-category" placeholder="e.g. tools">
+                    </div>
+                    <div class="form-group">
+                        <label for="github-filename">Filename</label>
+                        <input type="text" id="github-filename" placeholder="e.g. my_script.sh">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" id="github-modal-cancel">Cancel</button>
+                <button class="btn btn-save" id="github-modal-import">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" x2="12" y1="15" y2="3" />
+                    </svg>
+                    Import Script
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lock Management Modal -->
+    <div class="modal-overlay" id="lock-modal-overlay">
+        <div class="modal" id="lock-modal" style="width: 400px;">
+            <div class="modal-header">
+                <h2>Manage Layout Lock</h2>
+                <button class="btn-icon" id="lock-modal-close">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group" id="lock-current-pass-group" style="display:none;">
+                    <label for="lock-current-pass">Current Password</label>
+                    <input type="password" id="lock-current-pass" placeholder="Enter current password">
+                </div>
+                <div class="form-group">
+                    <label for="lock-new-pass">New Password (leave empty to remove lock)</label>
+                    <input type="password" id="lock-new-pass" placeholder="Enter new password">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" id="lock-modal-cancel">Cancel</button>
+                <button class="btn btn-save" id="lock-modal-save">Save Lock</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
