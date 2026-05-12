@@ -12,6 +12,7 @@ const API = {
     exec: '/api/exec',
     lock: '/api/scripts/lock',
     import_github: '/api/scripts/import_github',
+    pr: '/api/git/pr',
 };
 
 // ─── State ─────────────────────────────────────────────────
@@ -171,6 +172,8 @@ async function runScript(relPath) {
     }
 
     appendToCli(`$ Running script: ${relPath}`, 'cmd-line', termId);
+    // Mirror to debugger
+    if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('info', `▶ Running script: ${relPath}`, 'script');
 
     try {
         const res = await fetch(API.run, {
@@ -181,6 +184,7 @@ async function runScript(relPath) {
 
         if (res.status === 401) {
             appendToCli('Error: Script depends on a lock sequence. Unauthorized.', 'error', termId);
+            if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', 'Script is locked — unauthorized', 'script');
             if (termId === state.activeTerminalId) {
                 runStatus.textContent = 'Locked';
                 runStatus.className = 'run-status error';
@@ -199,7 +203,7 @@ async function runScript(relPath) {
             buffer += decoder.decode(value, { stream: true });
 
             let eolIndex;
-            while ((eolIndex = buffer.indexOf('\\n\\n')) >= 0) {
+            while ((eolIndex = buffer.indexOf('\n\n')) >= 0) {
                 const chunk = buffer.slice(0, eolIndex).trim();
                 buffer = buffer.slice(eolIndex + 2);
 
@@ -210,15 +214,26 @@ async function runScript(relPath) {
                         if (data.type === 'stdout' || data.type === 'error' || data.type === 'system') {
                             let cssClass = data.type === 'stdout' ? 'stdout' : (data.type === 'system' ? 'cmd-line' : 'error');
                             appendToCli(data.content, cssClass, termId);
+                            // Mirror stdout/stderr to debugger
+                            if (typeof DebuggerConsole !== 'undefined') {
+                                const dbgType = data.type === 'error' ? 'error' : 'log';
+                                DebuggerConsole.addEntry(dbgType, data.content.trimEnd(), relPath);
+                            }
                         } else if (data.type === 'metrics') {
                             if (data.success) {
                                 appendToCli(`Script completed (Exit code: ${data.exit_code})`, 'success', termId);
+                                if (typeof DebuggerConsole !== 'undefined') {
+                                    DebuggerConsole.addEntry('info', `✓ Script completed — exit code: ${data.exit_code} | time: ${data.resources?.execution_time_formatted || ''} | cpu: ${data.resources?.cpu_percent || 0}% | mem: ${data.resources?.memory_used_mb || 0}MB`, 'metrics');
+                                }
                                 if (termId === state.activeTerminalId) {
                                     runStatus.textContent = 'Success';
                                     runStatus.className = 'run-status success';
                                 }
                             } else {
                                 appendToCli(`Script failed (Exit code: ${data.exit_code})`, 'error', termId);
+                                if (typeof DebuggerConsole !== 'undefined') {
+                                    DebuggerConsole.addEntry('error', `✗ Script failed — exit code: ${data.exit_code}`, 'metrics');
+                                }
                                 if (termId === state.activeTerminalId) {
                                     runStatus.textContent = 'Failed';
                                     runStatus.className = 'run-status error';
@@ -238,6 +253,7 @@ async function runScript(relPath) {
         }
     } catch (err) {
         appendToCli(`Error executing script: ${err.message}`, 'error', termId);
+        if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `Script error: ${err.message}`, 'script');
         if (termId === state.activeTerminalId) {
             runStatus.textContent = 'Error';
             runStatus.className = 'run-status error';
@@ -257,6 +273,8 @@ async function execCommand(cmd) {
     state.cmdHistory.push(cmd);
     state.cmdHistoryIndex = state.cmdHistory.length;
     appendToCli(`$ ${cmd}`, 'cmd-line', termId);
+    // Mirror command to debugger
+    if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('info', `$ ${cmd}`, 'terminal');
 
     try {
         const res = await fetch(API.exec, {
@@ -276,7 +294,7 @@ async function execCommand(cmd) {
             buffer += decoder.decode(value, { stream: true });
 
             let eolIndex;
-            while ((eolIndex = buffer.indexOf('\\n\\n')) >= 0) {
+            while ((eolIndex = buffer.indexOf('\n\n')) >= 0) {
                 const chunk = buffer.slice(0, eolIndex).trim();
                 buffer = buffer.slice(eolIndex + 2);
 
@@ -285,9 +303,14 @@ async function execCommand(cmd) {
                         const data = JSON.parse(chunk.substring(6));
                         if (data.type === 'stdout' || data.type === 'error') {
                             appendToCli(data.content, data.type === 'stdout' ? 'stdout' : 'error', termId);
+                            // Mirror to debugger
+                            if (typeof DebuggerConsole !== 'undefined') {
+                                DebuggerConsole.addEntry(data.type === 'error' ? 'error' : 'log', data.content.trimEnd(), 'terminal');
+                            }
                         } else if (data.type === 'metrics') {
                             if (!data.success) {
                                 appendToCli(`Command failed (Exit code: ${data.exit_code})`, 'error', termId);
+                                if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `Command failed — exit code: ${data.exit_code}`, 'terminal');
                             }
                         }
                     } catch (e) { }
@@ -296,6 +319,7 @@ async function execCommand(cmd) {
         }
     } catch (err) {
         appendToCli(`Error executing command: ${err.message}`, 'error', termId);
+        if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `Command error: ${err.message}`, 'terminal');
     }
 }
 
@@ -391,6 +415,68 @@ async function importGithubScript(url, category, filename) {
     } catch (err) {
         console.error('Import error:', err);
         alert('Exception during import: ' + err.message);
+    }
+}
+
+// --- NEW FEATURE: Pull Request / Git Push Workflow ---
+
+// 1. Opens the custom PR modal and populates default branch/message values
+function raisePRFlow(relPath) {
+    const overlay = document.getElementById('pr-modal-overlay');
+    if (!overlay) return;
+    
+    // Set default values based on script path to speed up workflow
+    const defaultBranch = `contrib-${relPath.replace(/\//g, '-').replace('.sh', '')}`;
+    const defaultMsg = `Update/Add script: ${relPath}`;
+    
+    document.getElementById('pr-branch').value = defaultBranch;
+    document.getElementById('pr-message').value = defaultMsg;
+    
+    overlay.classList.add('active');
+}
+
+// 2. Executes the API call to the backend after the modal is submitted
+async function executePR(relPath, branch, message, repoUrl) {
+    // Hide the modal immediately
+    document.getElementById('pr-modal-overlay').classList.remove('active');
+
+    // Automatically toggle the Debugger Console to show progress logs to the user
+    if (typeof DebuggerConsole !== 'undefined') {
+        DebuggerConsole.toggle();
+        DebuggerConsole.addEntry('info', `🚀 Starting Git PR workflow for: ${relPath}`, 'git');
+        if (repoUrl) DebuggerConsole.addEntry('info', `   Target Repo: ${repoUrl}`, 'git');
+        DebuggerConsole.addEntry('info', `   Branch: ${branch}`, 'git');
+        DebuggerConsole.addEntry('info', `   Message: ${message}`, 'git');
+        DebuggerConsole.addEntry('info', `Running git operations in backend...`, 'git');
+    }
+
+    try {
+        // Call the backend API with the branch, message, and the optional target repo
+        const res = await fetch(API.pr, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: relPath, branch, message, target_repo: repoUrl }),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            if (typeof DebuggerConsole !== 'undefined') {
+                DebuggerConsole.addEntry('log', `✨ Git operation successful!`, 'git');
+                DebuggerConsole.addEntry('log', `🔗 PR Link: ${data.pr_url}`, 'git');
+            }
+            appendToCli(`✓ Git PR branch '${data.branch}' created and pushed.`, 'success');
+            
+            // Offer to automatically open the GitHub Pull Request page
+            if (confirm(`Successfully pushed to branch '${data.branch}'.\n\nWould you like to open the Pull Request page on GitHub?`)) {
+                window.open(data.pr_url, '_blank');
+            }
+        } else {
+            if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `❌ Git PR failed: ${data.error}`, 'git');
+            alert('PR Workflow failed: ' + data.error);
+        }
+    } catch (err) {
+        if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `❌ Git PR Exception: ${err.message}`, 'git');
+        alert('Exception during PR workflow: ' + err.message);
     }
 }
 
@@ -954,6 +1040,8 @@ function bindEvents() {
     const btnFav = document.getElementById('btn-fav');
     if (btnFav) btnFav.addEventListener('click', () => { if (state.activeScript) toggleFavorite(state.activeScript); });
 
+
+
     // Clear terminal
     document.getElementById('btn-clear').addEventListener('click', clearCli);
     document.getElementById('btn-close-detail').addEventListener('click', showWelcome);
@@ -998,6 +1086,28 @@ function bindEvents() {
 
             if (!url || !category || !filename) return alert("All fields are required!");
             importGithubScript(url, category, filename);
+        });
+    }
+
+    // PR Modal Features
+    const prOverlay = document.getElementById('pr-modal-overlay');
+    if (prOverlay) {
+        const closePr = () => prOverlay.classList.remove('active');
+        document.getElementById('pr-modal-close').addEventListener('click', closePr);
+        document.getElementById('pr-modal-cancel').addEventListener('click', closePr);
+        prOverlay.addEventListener('click', (e) => { if (e.target.id === 'pr-modal-overlay') closePr(); });
+
+        document.getElementById('pr-modal-submit').addEventListener('click', () => {
+            const repoUrl = document.getElementById('pr-repo').value.trim();
+            const branch = document.getElementById('pr-branch').value.trim();
+            const message = document.getElementById('pr-message').value.trim();
+            if (!branch || !message) {
+                alert("Both branch name and commit message are required.");
+                return;
+            }
+            if (state.activeScript) {
+                executePR(state.activeScript, branch, message, repoUrl);
+            }
         });
     }
 
@@ -1086,3 +1196,393 @@ function escapeHtml(text) {
 function escapeAttr(text) {
     return text.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+
+// ═══════════════════════════════════════════════════════════
+//  Debugger Console with Smart Suggestions
+// ═══════════════════════════════════════════════════════════
+
+const DebuggerConsole = (() => {
+    let entries = [];
+    let activeFilter = 'all';
+    let suggestionIndex = -1;
+    let debugHistory = [];
+    let debugHistoryIdx = -1;
+    let isOpen = false;
+
+    const ICONS_DBG = {
+        log: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`,
+        warn: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+        error: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>`,
+        info: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`,
+        network: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
+        result: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>`,
+        input: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>`,
+    };
+
+    // Smart suggestion database (JS expressions and debug helpers only)
+    const SUGGESTIONS = [
+        { cmd: 'clear', desc: 'Clear debugger console', icon: 'cmd', category: 'debug' },
+        { cmd: 'state', desc: 'Inspect current app state', icon: 'debug', category: 'debug' },
+        { cmd: 'state.scripts', desc: 'View loaded scripts object', icon: 'debug', category: 'debug' },
+        { cmd: 'state.activeScript', desc: 'Show currently selected script', icon: 'debug', category: 'debug' },
+        { cmd: 'state.terminals', desc: 'List active terminal IDs', icon: 'debug', category: 'debug' },
+        { cmd: 'state.cmdHistory', desc: 'View command history', icon: 'debug', category: 'debug' },
+        { cmd: 'state.expandedCategories', desc: 'View expanded categories', icon: 'debug', category: 'debug' },
+        { cmd: 'Object.keys(state.scripts)', desc: 'List script categories', icon: 'debug', category: 'debug' },
+        { cmd: 'JSON.stringify(state, null, 2)', desc: 'Pretty print full state', icon: 'debug', category: 'debug' },
+        { cmd: 'document.title', desc: 'Get page title', icon: 'cmd', category: 'js' },
+        { cmd: 'window.location.href', desc: 'Get current URL', icon: 'cmd', category: 'js' },
+        { cmd: 'navigator.userAgent', desc: 'Get browser user agent', icon: 'cmd', category: 'js' },
+        { cmd: 'performance.now()', desc: 'Get high-res timestamp', icon: 'cmd', category: 'js' },
+        { cmd: 'loadScripts()', desc: 'Reload scripts from server', icon: 'script', category: 'debug' },
+    ];
+
+    function getTime() {
+        const d = new Date();
+        return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function addEntry(type, content, source = '') {
+        const entry = { type, content: String(content), source, time: getTime(), id: Date.now() + Math.random() };
+        entries.push(entry);
+        renderEntry(entry);
+        updateCount();
+        updateFilterBadges();
+    }
+
+    function renderEntry(entry) {
+        const body = document.getElementById('debugger-body');
+        if (!body) return;
+        const welcome = body.querySelector('.debugger-welcome');
+        if (welcome) welcome.remove();
+
+        const el = document.createElement('div');
+        el.className = `debugger-entry ${entry.type}`;
+        el.dataset.type = entry.type;
+        if (activeFilter !== 'all' && entry.type !== activeFilter) el.classList.add('hidden');
+
+        el.innerHTML = `
+            <span class="debugger-entry-icon">${ICONS_DBG[entry.type] || ICONS_DBG.log}</span>
+            <span class="debugger-entry-time">${entry.time}</span>
+            <span class="debugger-entry-content">${escapeHtml(entry.content)}</span>
+            ${entry.source ? `<span class="debugger-entry-source">${escapeHtml(entry.source)}</span>` : ''}
+        `;
+        body.appendChild(el);
+        body.scrollTop = body.scrollHeight;
+    }
+
+    function updateCount() {
+        const el = document.getElementById('debugger-log-count');
+        if (el) {
+            const visible = activeFilter === 'all' ? entries.length : entries.filter(e => e.type === activeFilter).length;
+            el.textContent = `${visible} ${visible === 1 ? 'entry' : 'entries'}`;
+        }
+    }
+
+    function updateFilterBadges() {
+        const errorCount = entries.filter(e => e.type === 'error').length;
+        const warnCount = entries.filter(e => e.type === 'warn').length;
+        const errTab = document.querySelector('.debugger-filter-tab[data-filter="error"]');
+        const warnTab = document.querySelector('.debugger-filter-tab[data-filter="warn"]');
+        if (errTab) errTab.classList.toggle('has-entries', errorCount > 0);
+        if (warnTab) warnTab.classList.toggle('has-entries', warnCount > 0);
+        if (errTab && errorCount > 0) errTab.textContent = `Error (${errorCount})`;
+        else if (errTab) errTab.textContent = 'Error';
+        if (warnTab && warnCount > 0) warnTab.textContent = `Warn (${warnCount})`;
+        else if (warnTab) warnTab.textContent = 'Warn';
+    }
+
+    function setFilter(filter) {
+        activeFilter = filter;
+        document.querySelectorAll('.debugger-filter-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.filter === filter);
+        });
+        document.querySelectorAll('.debugger-entry').forEach(el => {
+            if (filter === 'all') el.classList.remove('hidden');
+            else el.classList.toggle('hidden', el.dataset.type !== filter);
+        });
+        updateCount();
+    }
+
+    function clearConsole() {
+        entries = [];
+        const body = document.getElementById('debugger-body');
+        if (body) body.innerHTML = `<div class="debugger-welcome"><span class="debugger-welcome-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span><span>Console cleared.</span></div>`;
+        updateCount();
+        updateFilterBadges();
+    }
+
+    function toggle() {
+        const panel = document.getElementById('debugger-console');
+        const btn = document.getElementById('btn-debugger-toggle');
+        if (!panel) return;
+        isOpen = !isOpen;
+        panel.classList.toggle('open', isOpen);
+        btn.classList.toggle('active', isOpen);
+        document.body.classList.toggle('debugger-open', isOpen);
+        if (isOpen) {
+            const h = panel.offsetHeight;
+            document.documentElement.style.setProperty('--debugger-height', h + 'px');
+        }
+    }
+
+    function close() {
+        isOpen = false;
+        const panel = document.getElementById('debugger-console');
+        const btn = document.getElementById('btn-debugger-toggle');
+        if (panel) panel.classList.remove('open');
+        if (btn) btn.classList.remove('active');
+        document.body.classList.remove('debugger-open');
+    }
+
+    function getSuggestions(query) {
+        const q = query.toLowerCase();
+        const scriptSugs = [];
+        const stateSugs = [];
+
+        // 1. Dynamic property suggestions for 'state' object
+        if (q.startsWith('state.')) {
+            const parts = q.split('.');
+            const prefix = parts.slice(0, -1).join('.');
+            const lastPart = parts[parts.length - 1];
+            
+            // For now, just handle top-level properties of 'state'
+            if (typeof state !== 'undefined') {
+                Object.keys(state).forEach(key => {
+                    if (key.toLowerCase().startsWith(lastPart)) {
+                        stateSugs.push({ 
+                            cmd: `${prefix}.${key}`, 
+                            desc: `Property: ${typeof state[key]}`, 
+                            icon: 'debug', 
+                            category: 'debug' 
+                        });
+                    }
+                });
+            }
+        }
+
+        // 2. Dynamic script suggestions
+        if (typeof state !== 'undefined' && state.scripts) {
+            for (const [cat, scripts] of Object.entries(state.scripts)) {
+                for (const s of scripts) {
+                    if (s.name.toLowerCase().includes(q) || s.relative_path.toLowerCase().includes(q)) {
+                        scriptSugs.push({ cmd: `runScript('${s.relative_path}')`, desc: `Run: ${s.name}`, icon: 'script', category: 'script' });
+                    }
+                }
+            }
+        }
+
+        // 3. Static suggestions
+        const matched = SUGGESTIONS.filter(s => s.cmd.toLowerCase().includes(q) || s.desc.toLowerCase().includes(q));
+        
+        // Combine all, prioritizing state property completions if they exist
+        const all = [...stateSugs, ...scriptSugs, ...matched];
+        
+        // Remove duplicates (by cmd)
+        const unique = [];
+        const seen = new Set();
+        for (const item of all) {
+            if (!seen.has(item.cmd)) {
+                unique.push(item);
+                seen.has(item.cmd);
+                seen.add(item.cmd);
+            }
+        }
+        
+        return unique.slice(0, 10);
+    }
+
+    function renderSuggestions(query) {
+        const container = document.getElementById('debugger-suggestions');
+        if (!container) return;
+        const items = getSuggestions(query);
+        if (items.length === 0) { container.classList.remove('open'); return; }
+
+        suggestionIndex = -1;
+        container.innerHTML = items.map((s, i) => `
+            <div class="debugger-suggestion-item" data-index="${i}" data-cmd="${escapeAttr(s.cmd)}">
+                <span class="suggestion-icon ${s.icon}">${s.icon === 'cmd' ? '›' : s.icon === 'bash' ? '$' : s.icon === 'debug' ? '⚙' : '▶'}</span>
+                <div class="suggestion-content">
+                    <div class="suggestion-title">${escapeHtml(s.cmd)}</div>
+                    <div class="suggestion-desc">${escapeHtml(s.desc)}</div>
+                </div>
+                <span class="suggestion-kbd">Tab</span>
+            </div>
+        `).join('');
+        container.classList.add('open');
+
+        container.querySelectorAll('.debugger-suggestion-item').forEach(el => {
+            el.addEventListener('click', () => {
+                document.getElementById('debugger-input').value = el.dataset.cmd;
+                container.classList.remove('open');
+                document.getElementById('debugger-input').focus();
+            });
+        });
+    }
+
+    function navigateSuggestions(dir) {
+        const container = document.getElementById('debugger-suggestions');
+        const items = container.querySelectorAll('.debugger-suggestion-item');
+        if (!items.length) return;
+        items.forEach(i => i.classList.remove('selected'));
+        suggestionIndex = (suggestionIndex + dir + items.length) % items.length;
+        items[suggestionIndex].classList.add('selected');
+        items[suggestionIndex].scrollIntoView({ block: 'nearest' });
+    }
+
+    function acceptSuggestion() {
+        const container = document.getElementById('debugger-suggestions');
+        const items = container.querySelectorAll('.debugger-suggestion-item');
+        if (suggestionIndex >= 0 && items[suggestionIndex]) {
+            document.getElementById('debugger-input').value = items[suggestionIndex].dataset.cmd;
+            container.classList.remove('open');
+            return true;
+        } else if (items.length > 0) {
+            document.getElementById('debugger-input').value = items[0].dataset.cmd;
+            container.classList.remove('open');
+            return true;
+        }
+        return false;
+    }
+
+    function evaluate(expr) {
+        if (!expr.trim()) return;
+        debugHistory.push(expr);
+        debugHistoryIdx = debugHistory.length;
+        addEntry('input', `› ${expr}`);
+
+        if (expr.trim() === 'clear') { clearConsole(); return; }
+
+        // JS expression evaluator only
+        try {
+            const result = eval(expr); // eslint-disable-line no-eval
+            const output = (result === null) ? 'null' :
+                (result === undefined) ? 'undefined' :
+                typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+            addEntry('result', output);
+        } catch (e) {
+            addEntry('error', e.message, 'eval');
+        }
+    }
+
+    // Intercept console methods
+    function interceptConsole() {
+        const orig = { log: console.log, warn: console.warn, error: console.error, info: console.info };
+        console.log = (...args) => { orig.log.apply(console, args); addEntry('log', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '), 'console'); };
+        console.warn = (...args) => { orig.warn.apply(console, args); addEntry('warn', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '), 'console'); };
+        console.error = (...args) => { orig.error.apply(console, args); addEntry('error', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '), 'console'); };
+        console.info = (...args) => { orig.info.apply(console, args); addEntry('info', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '), 'console'); };
+
+        // Intercept fetch for network logging (only log errors, not 2xx)
+        const origFetch = window.fetch;
+        window.fetch = async (...args) => {
+            const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+            const method = args[1]?.method || 'GET';
+            const startTime = performance.now();
+            try {
+                const res = await origFetch.apply(window, args);
+                const elapsed = (performance.now() - startTime).toFixed(1);
+                // Only log failed requests (non-2xx status codes)
+                if (!res.ok) {
+                    addEntry('network', `${method} ${url} → ${res.status} (${elapsed}ms)`, 'fetch');
+                }
+                return res;
+            } catch (e) {
+                addEntry('network', `${method} ${url} → FAILED: ${e.message}`, 'fetch');
+                throw e;
+            }
+        };
+
+        // Catch unhandled errors
+        window.addEventListener('error', (e) => { addEntry('error', `${e.message} at ${e.filename}:${e.lineno}`, 'window'); });
+        window.addEventListener('unhandledrejection', (e) => { addEntry('error', `Unhandled Promise: ${e.reason}`, 'promise'); });
+    }
+
+    function initResizer() {
+        const handle = document.getElementById('debugger-resize-handle');
+        const panel = document.getElementById('debugger-console');
+        if (!handle || !panel) return;
+        let resizing = false;
+        handle.addEventListener('mousedown', (e) => { resizing = true; e.preventDefault(); document.body.style.cursor = 'ns-resize'; });
+        document.addEventListener('mousemove', (e) => {
+            if (!resizing) return;
+            let h = window.innerHeight - e.clientY;
+            if (h < 150) h = 150;
+            if (h > window.innerHeight * 0.7) h = window.innerHeight * 0.7;
+            panel.style.height = h + 'px';
+            document.documentElement.style.setProperty('--debugger-height', h + 'px');
+        });
+        document.addEventListener('mouseup', () => { if (resizing) { resizing = false; document.body.style.cursor = ''; } });
+    }
+
+    function init() {
+        interceptConsole();
+        initResizer();
+
+        const toggleBtn = document.getElementById('btn-debugger-toggle');
+        if (toggleBtn) toggleBtn.addEventListener('click', toggle);
+
+        const closeBtn = document.getElementById('debugger-close');
+        if (closeBtn) closeBtn.addEventListener('click', close);
+
+        const clearBtn = document.getElementById('debugger-clear');
+        if (clearBtn) clearBtn.addEventListener('click', clearConsole);
+
+        // Filter tabs
+        document.querySelectorAll('.debugger-filter-tab').forEach(tab => {
+            tab.addEventListener('click', () => setFilter(tab.dataset.filter));
+        });
+
+        // Input handling
+        const input = document.getElementById('debugger-input');
+        const sugBox = document.getElementById('debugger-suggestions');
+        if (input) {
+            input.addEventListener('input', () => renderSuggestions(input.value));
+            input.addEventListener('focus', () => renderSuggestions(input.value));
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    if (sugBox && sugBox.classList.contains('open')) acceptSuggestion();
+                    else renderSuggestions(input.value);
+                } else if (e.key === 'ArrowDown' && sugBox && sugBox.classList.contains('open')) {
+                    e.preventDefault(); navigateSuggestions(1);
+                } else if (e.key === 'ArrowUp') {
+                    if (sugBox && sugBox.classList.contains('open')) { e.preventDefault(); navigateSuggestions(-1); }
+                    else if (debugHistory.length) { e.preventDefault(); if (debugHistoryIdx > 0) debugHistoryIdx--; input.value = debugHistory[debugHistoryIdx] || ''; }
+                } else if (e.key === 'Enter') {
+                    if (sugBox && sugBox.classList.contains('open') && suggestionIndex >= 0) { acceptSuggestion(); }
+                    else { evaluate(input.value); input.value = ''; }
+                    if (sugBox) sugBox.classList.remove('open');
+                } else if (e.key === 'Escape') {
+                    if (sugBox) sugBox.classList.remove('open');
+                }
+            });
+            // Close suggestions on outside click
+            document.addEventListener('click', (e) => {
+                if (sugBox && !sugBox.contains(e.target) && e.target !== input) sugBox.classList.remove('open');
+            });
+        }
+
+        const evalBtn = document.getElementById('debugger-eval-btn');
+        if (evalBtn) evalBtn.addEventListener('click', () => { evaluate(input.value); input.value = ''; if (sugBox) sugBox.classList.remove('open'); });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Ctrl+` to toggle debugger
+            if ((e.ctrlKey || e.metaKey) && e.key === '`') { 
+                e.preventDefault(); 
+                toggle(); 
+            }
+            // Ctrl+L to clear debugger (only if open)
+            if (isOpen && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
+                e.preventDefault();
+                clearConsole();
+            }
+        });
+    }
+
+    return { init, addEntry, toggle, close };
+})();
+
+// Initialize debugger when DOM is ready
+document.addEventListener('DOMContentLoaded', () => { DebuggerConsole.init(); });

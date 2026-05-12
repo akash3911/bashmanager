@@ -1260,6 +1260,447 @@ body {
     }
 }
 
+/* ─── Debugger Console ────────────────────────────────── */
+.debugger-console {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 280px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 200;
+    transform: translateY(100%);
+    transition: transform var(--transition-slow);
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.debugger-console.open {
+    transform: translateY(0);
+}
+
+.debugger-resize-handle {
+    height: 5px;
+    background: transparent;
+    cursor: ns-resize;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.debugger-resize-handle::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 1px;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 3px;
+    background: var(--border-bright);
+    border-radius: 3px;
+    transition: background var(--transition-fast);
+}
+
+.debugger-resize-handle:hover::after {
+    background: var(--accent);
+}
+
+.debugger-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 16px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.debugger-header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.debugger-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.debugger-title svg {
+    color: var(--text-muted);
+}
+
+.debugger-filter-tabs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.debugger-filter-tab {
+    padding: 3px 10px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    white-space: nowrap;
+}
+
+.debugger-filter-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.debugger-filter-tab.active {
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+.debugger-filter-tab[data-filter="error"].has-entries {
+    color: var(--accent-red);
+}
+
+.debugger-filter-tab[data-filter="warn"].has-entries {
+    color: var(--accent-orange);
+}
+
+.debugger-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.debugger-log-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-weight: 500;
+    padding-right: 4px;
+}
+
+.debugger-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.debugger-welcome {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-family: var(--font-ui);
+}
+
+.debugger-welcome-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    color: var(--accent-blue);
+}
+
+/* Debugger log entries */
+.debugger-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 4px 16px;
+    border-bottom: 1px solid rgba(39, 39, 42, 0.5);
+    transition: background var(--transition-fast);
+    animation: debugEntryIn 200ms ease forwards;
+}
+
+@keyframes debugEntryIn {
+    from {
+        opacity: 0;
+        transform: translateX(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.debugger-entry:hover {
+    background: var(--bg-hover);
+}
+
+.debugger-entry.hidden {
+    display: none;
+}
+
+.debugger-entry-icon {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 2px;
+}
+
+.debugger-entry-time {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--text-muted);
+    min-width: 58px;
+    margin-top: 2px;
+    font-family: var(--font-mono);
+}
+
+.debugger-entry-content {
+    flex: 1;
+    word-break: break-all;
+    white-space: pre-wrap;
+    min-width: 0;
+}
+
+.debugger-entry-source {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Entry type styling */
+.debugger-entry.log {
+    color: var(--text-primary);
+}
+
+.debugger-entry.log .debugger-entry-icon {
+    color: var(--text-muted);
+}
+
+.debugger-entry.warn {
+    color: var(--accent-orange);
+    background: rgba(245, 158, 11, 0.04);
+}
+
+.debugger-entry.warn .debugger-entry-icon {
+    color: var(--accent-orange);
+}
+
+.debugger-entry.error {
+    color: var(--accent-red);
+    background: rgba(239, 68, 68, 0.04);
+}
+
+.debugger-entry.error .debugger-entry-icon {
+    color: var(--accent-red);
+}
+
+.debugger-entry.info {
+    color: var(--accent-blue);
+}
+
+.debugger-entry.info .debugger-entry-icon {
+    color: var(--accent-blue);
+}
+
+.debugger-entry.network {
+    color: var(--accent-purple);
+}
+
+.debugger-entry.network .debugger-entry-icon {
+    color: var(--accent-purple);
+}
+
+.debugger-entry.result {
+    color: var(--accent);
+    background: rgba(16, 185, 129, 0.04);
+}
+
+.debugger-entry.result .debugger-entry-icon {
+    color: var(--accent);
+}
+
+.debugger-entry.input {
+    color: var(--accent-blue);
+}
+
+.debugger-entry.input .debugger-entry-icon {
+    color: var(--accent-blue);
+}
+
+/* Debugger input area */
+.debugger-input-area {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.debugger-input-prompt {
+    color: var(--accent-blue);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.debugger-input-wrapper {
+    position: relative;
+    flex: 1;
+}
+
+#debugger-input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    caret-color: var(--accent-blue);
+    padding: 4px 0;
+}
+
+#debugger-input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Smart Suggestions dropdown */
+.debugger-suggestions {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--radius);
+    max-height: 240px;
+    overflow-y: auto;
+    display: none;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.3);
+    z-index: 300;
+}
+
+.debugger-suggestions.open {
+    display: block;
+}
+
+.debugger-suggestion-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    border-bottom: 1px solid rgba(39, 39, 42, 0.3);
+}
+
+.debugger-suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.debugger-suggestion-item:hover,
+.debugger-suggestion-item.selected {
+    background: var(--bg-hover);
+}
+
+.debugger-suggestion-item.selected {
+    background: var(--accent-glow);
+}
+
+.suggestion-icon {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+}
+
+.suggestion-icon.cmd {
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--accent-blue);
+}
+
+.suggestion-icon.bash {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent);
+}
+
+.suggestion-icon.debug {
+    background: rgba(139, 92, 246, 0.15);
+    color: var(--accent-purple);
+}
+
+.suggestion-icon.script {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--accent-orange);
+}
+
+.suggestion-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.suggestion-title {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.suggestion-desc {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.suggestion-kbd {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    background: var(--bg-primary);
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+/* Debugger toggle active state in header */
+#btn-debugger-toggle.active {
+    color: var(--accent);
+    background: var(--accent-glow);
+    border-color: var(--accent-dim);
+}
+
+/* Body adjustment when debugger is open */
+body.debugger-open #app-main {
+    height: calc(100vh - var(--header-height) - var(--debugger-height, 280px));
+}
+
 /* ─── Animations ──────────────────────────────────────── */
 @keyframes fadeIn {
     from {

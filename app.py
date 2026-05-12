@@ -3,6 +3,7 @@ import json
 import time
 import subprocess
 import threading
+import queue
 import uuid
 import psutil
 import hashlib
@@ -203,18 +204,24 @@ def run_script():
             )
 
             metrics = {'cpu': 0.0, 'mem': 0.0}
-            t = threading.Thread(target=_track_metrics, args=(proc, metrics))
-            t.start()
+            t_metrics = threading.Thread(target=_track_metrics, args=(proc, metrics))
+            t_metrics.start()
             
-            yield f"data: {json.dumps({'type': 'system', 'content': f'Starting script execution... (ID: {run_id})\\n'})}\n\n"
+            yield f"data: {json.dumps({'type': 'system', 'content': f'Starting script execution... (ID: {run_id})\n'})}\n\n"
 
             for line in iter(proc.stdout.readline, ''):
                 if line:
-                    yield f"data: {json.dumps({'type': 'stdout', 'content': line})}\n\n"
+                    # Heuristic to detect errors in the combined stream
+                    l_lower = line.lower()
+                    msg_type = 'stdout'
+                    if any(err in l_lower for err in ['error:', 'failed:', 'not found', 'denied', 'no such file']):
+                        msg_type = 'error'
+                    
+                    yield f"data: {json.dumps({'type': msg_type, 'content': line})}\n\n"
 
             proc.stdout.close()
-            proc.wait(timeout=60)
-            t.join(timeout=1)
+            proc.wait(timeout=10)
+            t_metrics.join(timeout=1)
             
             end_time = time.time()
             elapsed = end_time - start_time
@@ -232,11 +239,8 @@ def run_script():
             }
 
             yield f"data: {json.dumps({'type': 'metrics', 'resources': resource_info, 'exit_code': proc.returncode, 'success': proc.returncode == 0})}\n\n"
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            yield f"data: {json.dumps({'type': 'error', 'content': '⏱️ Script timed out after 60 seconds'})}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': f'❌ Error: {str(e)}'})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'content': f'❌ Execution Error: {str(e)}'})}\n\n"
 
     return Response(generate(), mimetype='text/event-stream')
 
@@ -268,16 +272,17 @@ def exec_command():
             
             for line in iter(proc.stdout.readline, ''):
                 if line:
-                    yield f"data: {json.dumps({'type': 'stdout', 'content': line})}\n\n"
+                    l_lower = line.lower()
+                    msg_type = 'stdout'
+                    if any(err in l_lower for err in ['error:', 'failed:', 'not found', 'denied', 'no such file']):
+                        msg_type = 'error'
+                    yield f"data: {json.dumps({'type': msg_type, 'content': line})}\n\n"
                     
             proc.stdout.close()
-            proc.wait(timeout=60)
+            proc.wait(timeout=10)
             yield f"data: {json.dumps({'type': 'metrics', 'exit_code': proc.returncode, 'success': proc.returncode == 0})}\n\n"
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            yield f"data: {json.dumps({'type': 'error', 'content': '⏱️ Command timed out after 60 seconds'})}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': f'❌ Error: {str(e)}'})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'content': f'❌ Command Error: {str(e)}'})}\n\n"
 
     return Response(generate(), mimetype='text/event-stream')
 
@@ -423,6 +428,68 @@ def import_github():
         f.write(content)
 
     return jsonify({'success': True, 'path': rel_path})
+
+
+# --- NEW FEATURE: Raise PR / Push to Git ---
+@app.route('/api/git/pr', methods=['POST'])
+def raise_pr():
+    # Parse the request payload for the script path, branch, commit message, and optional target repo
+    data = request.json
+    rel_path = data.get('path', '')
+    branch_name = data.get('branch', f'script-contribution-{str(uuid.uuid4())[:4]}')
+    commit_msg = data.get('message', f'Contribution: {rel_path}')
+    target_repo = data.get('target_repo', '').strip()
+    
+    if not rel_path:
+        return jsonify({'error': 'No script path provided', 'success': False}), 400
+
+    full_path = os.path.join(SCRIPTS_DIR, rel_path)
+    
+    try:
+        # Check if we are in a git repo
+        subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], check=True, capture_output=True)
+        
+        # 1. Create new local branch for the contribution
+        subprocess.run(['git', 'checkout', '-b', branch_name], check=True, capture_output=True)
+        
+        # 2. Stage only the specific script file
+        subprocess.run(['git', 'add', full_path], check=True, capture_output=True)
+        
+        # 3. Commit the changes
+        subprocess.run(['git', 'commit', '-m', commit_msg], check=True, capture_output=True)
+        
+        # 4. Push to target remote
+        # If the user provided a specific target repository URL, we push directly to it.
+        # Otherwise, we push to the default 'origin'.
+        remote_to_push = target_repo if target_repo else 'origin'
+        subprocess.run(['git', 'push', '-u', remote_to_push, branch_name], check=True, capture_output=True)
+        
+        # 5. Generate a GitHub PR Link
+        # If an external repo URL was provided, use that to construct the base URL.
+        if target_repo:
+            remote_url = target_repo.replace('.git', '')
+        else:
+            remote_res = subprocess.run(['git', 'remote', 'get-url', 'origin'], check=True, capture_output=True, text=True)
+            remote_url = remote_res.stdout.strip().replace('.git', '')
+            
+        if remote_url.startswith('git@github.com:'):
+            remote_url = remote_url.replace('git@github.com:', 'https://github.com/')
+            
+        # Append the /compare path to take the user directly to the PR creation screen
+        pr_url = f"{remote_url}/compare/main...{branch_name}" if "github.com" in remote_url else remote_url
+        
+        # 6. Switch back to the main branch to keep the workspace stable
+        subprocess.run(['git', 'checkout', 'main'], check=True, capture_output=True)
+        
+        return jsonify({'success': True, 'pr_url': pr_url, 'branch': branch_name})
+        
+    except subprocess.CalledProcessError as e:
+        err_msg = e.stderr.decode() if e.stderr else str(e)
+        # Attempt recovery to main
+        subprocess.run(['git', 'checkout', 'main'], capture_output=True)
+        return jsonify({'error': err_msg, 'success': False}), 500
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
 
 
 # ─── Helpers ──────────────────────────────────────────────────────
