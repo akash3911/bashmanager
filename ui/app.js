@@ -49,6 +49,10 @@ let state = {
     terminals: [1],      // list of terminal IDs
     activeTerminalId: 1,
     nextTerminalId: 2,
+    workspaceRestored: false,
+    workspaceProfiles: [],
+    restoreMode: 'full',
+    workspaceRecoveryEnabled: true,
 };
 
 // ─── SVG Icons ─────────────────────────────────────────────
@@ -913,6 +917,7 @@ async function openReplay(sessionId) {
         overlay.classList.add('active');
 
         playReplay();
+        persistWorkspace();
     } catch (err) {
         console.error(err);
 
@@ -1015,6 +1020,7 @@ function appendToCli(text, className = '', termId = state.activeTerminalId) {
 
     termBody.scrollTop = termBody.scrollHeight;
     highlightTerminalSearch();
+    persistWorkspace();
 }
 
 function clearCli() {
@@ -1058,6 +1064,7 @@ function addTerminal() {
 
     document.getElementById('cli-area').insertBefore(bodyContainer, document.querySelector('.cli-input-bar'));
     switchTerminal(id);
+    persistWorkspace();
 }
 
 function switchTerminal(id) {
@@ -1072,6 +1079,7 @@ function switchTerminal(id) {
     if (activeBody) activeBody.style.display = 'block';
 
     highlightTerminalSearch();
+    persistWorkspace();
 }
 
 function closeTerminal(id) {
@@ -1087,6 +1095,7 @@ function closeTerminal(id) {
     if (state.activeTerminalId === id) {
         switchTerminal(state.terminals[state.terminals.length - 1]);
     }
+    persistWorkspace();
 }
 
 // ─── Terminal Search Highlight ───
@@ -1359,6 +1368,8 @@ async function selectScript(relPath) {
     // Animate in
     detailPanel.classList.add('animate-in');
     setTimeout(() => detailPanel.classList.remove('animate-in'), 300);
+
+    persistWorkspace();
 }
 
 function showWelcome() {
@@ -1495,6 +1506,10 @@ function bindEvents() {
                 cliInput.value = '';
             }
         }
+    });
+
+    cliInput.addEventListener('input', () => {
+        persistWorkspace();
     });
 
     // Run Command button
@@ -1763,6 +1778,22 @@ function bindEvents() {
                 .getElementById('analytics-modal-overlay')
                 .classList.remove('active');
         });
+
+    document
+        .getElementById('btn-workspaces')
+        ?.addEventListener('click', openWorkspaceManager);
+
+    document
+        .getElementById('workspace-manager-close')
+        ?.addEventListener('click', () => {
+            document
+                .getElementById('workspace-manager-overlay')
+                ?.classList.remove('active');
+        });
+
+    document
+        .getElementById('workspace-save-profile')
+        ?.addEventListener('click', saveWorkspaceProfile);
 }
 
 // ─── Helpers ───────────────────────────────────────────────
@@ -1856,6 +1887,375 @@ function notify(message, type = 'info') {
 // ═══════════════════════════════════════════════════════════
 //  Debugger Console with Smart Suggestions
 // ═══════════════════════════════════════════════════════════
+
+// ─── Workspace Persistence ─────────────────────────────────
+
+function serializeWorkspace() {
+    const terminalSnapshots = state.terminals.map(id => {
+        const terminalBody = document.getElementById(`terminal-body-${id}`);
+        return {
+            id,
+            content: terminalBody?.innerHTML || '',
+            pendingInput: document.getElementById('cli-input')?.value || ''
+        };
+    });
+
+    return {
+        terminals: state.terminals,
+        terminalSnapshots,
+        activeTerminalId: state.activeTerminalId,
+        activeScript: state.activeScript,
+        searchQuery: state.searchQuery,
+        debuggerVisible:
+            typeof DebuggerConsole !== 'undefined'
+                ? DebuggerConsole.visible
+                : false,
+        replayState: {
+            active: !!state.replay?.sessionId
+        }
+    };
+}
+
+async function persistWorkspace() {
+    try {
+        await fetch('/api/workspace', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(serializeWorkspace())
+        });
+    } catch (err) {
+        console.error('Workspace persistence failed:', err);
+    }
+}
+
+async function checkWorkspaceRecovery() {
+    if (state.workspaceRestored) {
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/workspace');
+        const data = await res.json();
+
+        if (data.workspace && data.workspace.corrupted) {
+            notify(
+                'Previous workspace snapshot was corrupted and has been isolated.',
+                'warning'
+            );
+            return;
+        }
+
+        if (!data.workspace || !data.workspace.workspace) {
+            return;
+        }
+
+        const snapshot = data.workspace.workspace;
+
+        const savedAt = data.workspace.saved_at;
+        const modalBody = document.querySelector('#workspace-restore-overlay .modal-body');
+        if (modalBody && savedAt) {
+            const existing = modalBody.querySelector('.workspace-snapshot-meta');
+            if (!existing) {
+                const meta = document.createElement('div');
+                meta.className = 'workspace-snapshot-meta';
+                meta.textContent = `Snapshot saved at: ${savedAt}`;
+                modalBody.appendChild(meta);
+            }
+        }
+
+        document
+            .getElementById('workspace-restore-overlay')
+            ?.classList.add('active');
+
+        document
+            .getElementById('workspace-restore-btn')
+            ?.addEventListener('click', () => {
+                restoreWorkspace(snapshot, 'full');
+            });
+
+        document
+            .getElementById('workspace-safe-btn')
+            ?.addEventListener('click', () => {
+                restoreWorkspace(snapshot, 'safe');
+            });
+
+        document
+            .getElementById('workspace-clean-btn')
+            ?.addEventListener('click', closeWorkspaceRestore);
+
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+function closeWorkspaceRestore() {
+    document
+        .getElementById('workspace-restore-overlay')
+        ?.classList.remove('active');
+}
+
+function sanitizeWorkspaceSnapshot(data) {
+    const snapshot = structuredClone(data);
+
+    if (!Array.isArray(snapshot.terminals)) {
+        snapshot.terminals = [1];
+    }
+
+    if (
+        !snapshot.activeTerminalId ||
+        !snapshot.terminals.includes(snapshot.activeTerminalId)
+    ) {
+        snapshot.activeTerminalId = snapshot.terminals[0] || 1;
+    }
+
+    return snapshot;
+}
+
+function rebuildTerminalWorkspace(terminals, activeTerminalId, dataSnapshots = []) {
+    const tabsContainer = document.getElementById('cli-tabs');
+    const cliArea = document.getElementById('cli-area');
+
+    // Remove existing dynamic tabs (keep btn-add-tab)
+    document.querySelectorAll('.cli-tab').forEach(tab => {
+        if (!tab.id?.includes('btn-add-tab')) {
+            tab.remove();
+        }
+    });
+
+    // Remove existing terminal bodies (keep the original #terminal-body / cli-output)
+    document.querySelectorAll('.cli-body').forEach(body => {
+        if (body.id !== 'cli-output') {
+            body.remove();
+        }
+    });
+
+    // Reset state safely
+    state.terminals = [];
+
+    // Rebuild each terminal
+    terminals.forEach(id => {
+        const tabBtn = document.createElement('div');
+        tabBtn.className = 'cli-tab';
+        tabBtn.dataset.id = id;
+        tabBtn.id = `tab-btn-${id}`;
+        tabBtn.innerHTML = `
+            <span class="cli-tab-title">
+                <span class="dot dot-red"></span>
+                <span class="dot dot-yellow"></span>
+                <span class="dot dot-green"></span>
+                <span>Terminal ${id}</span>
+            </span>
+            <button class="cli-tab-close" title="Close" aria-label="Close terminal">×</button>
+        `;
+        tabBtn.onclick = () => switchTerminal(id);
+        tabBtn.querySelector('.cli-tab-close')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeTerminal(id);
+        });
+        tabsContainer.insertBefore(tabBtn, document.getElementById('btn-add-tab'));
+
+        const bodyContainer = document.createElement('div');
+        bodyContainer.className = 'cli-body';
+        bodyContainer.id = `terminal-body-${id}`;
+        bodyContainer.style.display = 'none';
+        bodyContainer.setAttribute('role', 'log');
+        bodyContainer.setAttribute('aria-live', 'polite');
+        const snapshot = dataSnapshots?.find(snap => snap.id === id);
+        bodyContainer.innerHTML = snapshot?.content ||
+            `<div class="cli-welcome">
+                <span class="cli-prompt">$</span>
+                <span class="cli-welcome-text">Restored terminal session.</span>
+            </div>`;
+        cliArea.insertBefore(bodyContainer, document.querySelector('.cli-input-bar'));
+
+        state.terminals.push(id);
+    });
+
+    // Restore pending input from first snapshot
+    const firstSnapshot = dataSnapshots?.[0];
+    if (firstSnapshot?.pendingInput) {
+        const cliInput = document.getElementById('cli-input');
+        if (cliInput) {
+            cliInput.value = firstSnapshot.pendingInput;
+        }
+    }
+
+    // Activate the correct terminal
+    switchTerminal(activeTerminalId);
+
+    // Advance nextTerminalId past all restored IDs
+    state.nextTerminalId = Math.max(...terminals, 1) + 1;
+}
+
+function restoreWorkspace(snapshot, mode = 'full') {
+    try {
+        const data =
+            mode === 'safe'
+                ? sanitizeWorkspaceSnapshot(snapshot)
+                : snapshot;
+
+        if (Array.isArray(data.terminals)) {
+            rebuildTerminalWorkspace(
+                data.terminals,
+                data.activeTerminalId || 1,
+                data.terminalSnapshots || []
+            );
+        }
+
+        if (data.activeTerminalId) {
+            state.activeTerminalId = data.activeTerminalId;
+        }
+
+        if (mode !== 'safe' && data.activeScript) {
+            selectScript(data.activeScript);
+        }
+
+        if (data.replayState?.active) {
+            notify('Replay session context detected.', 'info');
+        }
+
+        if (
+            data.debuggerVisible &&
+            typeof DebuggerConsole !== 'undefined'
+        ) {
+            DebuggerConsole.show();
+        }
+
+        state.workspaceRestored = true;
+
+        closeWorkspaceRestore();
+
+        notify(`Workspace restored (${mode} mode).`, 'success');
+
+    } catch (err) {
+        console.error(err);
+        notify('Workspace recovery failed.', 'error');
+    }
+}
+
+// ─── Workspace Manager ─────────────────────────────────────
+
+async function openWorkspaceManager() {
+    try {
+        const res = await fetch('/api/workspace/profiles');
+        const data = await res.json();
+
+        const container = document.getElementById('workspace-profile-list');
+
+        if (!data.profiles.length) {
+            container.innerHTML = '<p style="color:var(--text-secondary);margin:0;">No saved profiles yet.</p>';
+        } else {
+            container.innerHTML = data.profiles.map(profile => `
+                <div class="workspace-profile-item">
+                    <span>${escapeHtml(profile)}</span>
+                    <div class="workspace-profile-actions">
+                        <button class="btn" onclick="loadWorkspaceProfile('${escapeHtml(profile)}')">Load</button>
+                        <button class="btn" onclick="deleteWorkspaceProfile('${escapeHtml(profile)}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        document
+            .getElementById('workspace-manager-overlay')
+            .classList.add('active');
+
+    } catch (err) {
+        console.error(err);
+        notify('Failed to load workspace profiles.', 'error');
+    }
+}
+
+async function saveWorkspaceProfile() {
+    const input = document.getElementById('workspace-profile-name');
+    const name = input.value.trim();
+
+    if (!name) {
+        notify('Profile name required.', 'warning');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/workspace/profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, workspace: serializeWorkspace() })
+        });
+
+        const data = await res.json();
+
+        if (!data.success) {
+            notify(data.error, 'error');
+            return;
+        }
+
+        input.value = '';
+        notify('Workspace profile saved.', 'success');
+        openWorkspaceManager();
+
+    } catch (err) {
+        console.error(err);
+        notify('Failed to save workspace profile.', 'error');
+    }
+}
+
+async function loadWorkspaceProfile(name) {
+    try {
+        const res = await fetch(`/api/workspace/profile/${encodeURIComponent(name)}`);
+        const data = await res.json();
+
+        if (!data.success) {
+            notify(data.error, 'error');
+            return;
+        }
+
+        const profile = data.profile;
+
+        if (!profile.workspace) {
+            notify('Invalid workspace profile.', 'error');
+            return;
+        }
+
+        restoreWorkspace(profile.workspace, 'full');
+
+        document
+            .getElementById('workspace-manager-overlay')
+            ?.classList.remove('active');
+
+        notify(`Workspace profile "${name}" loaded.`, 'success');
+
+    } catch (err) {
+        console.error(err);
+        notify('Failed to load workspace profile.', 'error');
+    }
+}
+
+async function deleteWorkspaceProfile(name) {
+    const confirmed = confirm(`Delete workspace profile "${name}"?`);
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/workspace/profile/${encodeURIComponent(name)}`, {
+            method: 'DELETE'
+        });
+
+        const data = await res.json();
+
+        if (!data.success) {
+            notify(data.error, 'error');
+            return;
+        }
+
+        notify('Workspace profile deleted.', 'success');
+        openWorkspaceManager();
+
+    } catch (err) {
+        console.error(err);
+        notify('Failed to delete workspace profile.', 'error');
+    }
+}
 
 const DebuggerConsole = (() => {
     let entries = [];
@@ -1980,6 +2380,7 @@ const DebuggerConsole = (() => {
             const h = panel.offsetHeight;
             document.documentElement.style.setProperty('--debugger-height', h + 'px');
         }
+        persistWorkspace();
     }
 
     function close() {
