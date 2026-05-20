@@ -2195,3 +2195,55 @@ body.debugger-open #app-main {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
 }
+/* ─── Workspace Recovery ───────────────── */
+
+.workspace-recovery-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+.workspace-recovery-actions .btn {
+    flex: 1;
+}
+
+#workspace-safe-btn {
+    border: 1px solid var(--accent-yellow);
+    color: var(--accent-yellow);
+}
+/* ─── Workspace Profiles ───────────────── */
+
+.workspace-profile-create {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.workspace-profile-create input {
+    flex: 1;
+}
+
+.workspace-profile-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.workspace-profile-actions {
+    display: flex;
+    gap: 8px;
+}
+/* ─── Workspace Snapshot Metadata ─────── */
+
+.workspace-snapshot-meta {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    opacity: 0.8;
+}

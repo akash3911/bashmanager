@@ -11,6 +11,7 @@ import hashlib
 import urllib.request
 import urllib.parse
 import re
+import shutil
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, send_from_directory, Response
 
@@ -26,6 +27,12 @@ SESSION_LOG_DIR = os.path.join(LOG_ROOT, 'sessions')
 HISTORY_FILE = os.path.join(LOG_ROOT, 'history.jsonl')
 FAILED_HISTORY_FILE = os.path.join(LOG_ROOT, 'failed.jsonl')
 COMMAND_HISTORY_FILE = os.path.join(LOG_ROOT, 'command_history.json')
+WORKSPACE_DIR = os.path.join(LOG_ROOT, 'workspaces')
+WORKSPACE_STATE_FILE = os.path.join(WORKSPACE_DIR, 'workspace_state.json')
+WORKSPACE_PROFILE_DIR = os.path.join(WORKSPACE_DIR, 'profiles')
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
+os.makedirs(WORKSPACE_PROFILE_DIR, exist_ok=True)
+
 SESSIONS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     'sessions.json'
@@ -39,6 +46,80 @@ MAX_HISTORY_EXCERPT_CHARS = 2000
 # Thread-safe registry for running script processes (keyed by run_id)
 active_processes = {}
 active_processes_lock = threading.Lock()
+
+
+def validate_workspace_snapshot(data):
+    if not isinstance(data, dict):
+        return False, 'Workspace snapshot must be an object'
+
+    terminals = data.get('terminals')
+    if terminals is not None and not isinstance(terminals, list):
+        return False, 'Invalid terminals structure'
+
+    active_terminal = data.get('activeTerminalId')
+    if active_terminal is not None and not isinstance(active_terminal, int):
+        return False, 'Invalid active terminal'
+
+    version = data.get('version')
+    if version is not None and not isinstance(version, int):
+        return False, 'Invalid snapshot version'
+
+    active_script = data.get('activeScript')
+    if active_script is not None and not isinstance(active_script, str):
+        return False, 'Invalid active script reference'
+
+    return True, None
+
+
+def load_workspace_state():
+    if not os.path.exists(WORKSPACE_STATE_FILE):
+        return None
+    try:
+        with open(WORKSPACE_STATE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        corrupted_path = WORKSPACE_STATE_FILE + '.corrupted'
+        try:
+            shutil.move(WORKSPACE_STATE_FILE, corrupted_path)
+        except Exception:
+            pass
+        return {
+            'corrupted': True,
+            'error': str(e)
+        }
+
+
+def save_workspace_state(data):
+    valid, error = validate_workspace_snapshot(data)
+    if not valid:
+        return False, error
+
+    payload = {
+        'version': 2,
+        'saved_at': datetime.now(timezone.utc).isoformat(),
+        'workspace': data
+    }
+
+    try:
+        with open(WORKSPACE_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2)
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def get_workspace_profile_path(name):
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+    return os.path.join(WORKSPACE_PROFILE_DIR, f'{safe_name}.json')
+
+
+def list_workspace_profiles():
+    profiles = []
+    for file in os.listdir(WORKSPACE_PROFILE_DIR):
+        if not file.endswith('.json'):
+            continue
+        profiles.append(file[:-5])
+    return sorted(profiles)
 
 
 def _ensure_log_dirs():
@@ -656,6 +737,90 @@ def get_session(session_id):
         data = json.load(f)
 
     return jsonify(data)
+
+
+@app.route('/api/workspace', methods=['GET'])
+def get_workspace_state():
+    data = load_workspace_state()
+    return jsonify({
+        'success': True,
+        'workspace': data
+    })
+
+
+@app.route('/api/workspace', methods=['POST'])
+def persist_workspace_state():
+    data = request.json or {}
+    success, error = save_workspace_state(data)
+    return jsonify({
+        'success': success,
+        'error': error
+    })
+
+
+@app.route('/api/workspace/profile', methods=['POST'])
+def save_workspace_profile():
+    data = request.json or {}
+    name = data.get('name', '').strip()
+    workspace = data.get('workspace')
+
+    if not name:
+        return jsonify({'success': False, 'error': 'Profile name required'}), 400
+
+    valid, error = validate_workspace_snapshot(workspace)
+    if not valid:
+        return jsonify({'success': False, 'error': error}), 400
+
+    profile_path = get_workspace_profile_path(name)
+    payload = {
+        'version': 2,
+        'saved_at': datetime.now(timezone.utc).isoformat(),
+        'profile_name': name,
+        'workspace': workspace
+    }
+
+    try:
+        with open(profile_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/workspace/profiles', methods=['GET'])
+def get_workspace_profiles():
+    return jsonify({
+        'success': True,
+        'profiles': list_workspace_profiles()
+    })
+
+
+@app.route('/api/workspace/profile/<name>', methods=['GET'])
+def load_workspace_profile(name):
+    profile_path = get_workspace_profile_path(name)
+    if not os.path.exists(profile_path):
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+
+    try:
+        with open(profile_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return jsonify({'success': True, 'profile': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/workspace/profile/<name>', methods=['DELETE'])
+def delete_workspace_profile(name):
+    profile_path = get_workspace_profile_path(name)
+    if not os.path.exists(profile_path):
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+
+    try:
+        os.remove(profile_path)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/scripts/content', methods=['POST'])
 def get_script_content():
