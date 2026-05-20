@@ -18,6 +18,7 @@ const API = {
     pr: '/api/git/pr',
     history: '/api/history',
     history_export: '/api/history/export',
+    kill: '/api/scripts/kill',
 };
 
 // ─── State ────────────────────────────────────────────────
@@ -49,10 +50,16 @@ let state = {
     terminals: [1],      // list of terminal IDs
     activeTerminalId: 1,
     nextTerminalId: 2,
+    workspaceRestored: false,
+    workspaceProfiles: [],
+    restoreMode: 'full',
+    workspaceRecoveryEnabled: true,
     sessionId: null,
     lastSaveTimestamp: 0,
     runningScripts: {},  // termId -> { step, total, command, status }
 };
+
+const RUN_BUTTON_IDLE_HTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Run</span>`;
 
 // ─── SVG Icons ─────────────────────────────────────────────
 const ICONS = {
@@ -242,17 +249,82 @@ async function fetchScriptContent(relPath, password = '') {
     }
 }
 
+function getTerminalBody(termId = state.activeTerminalId) {
+    return document.getElementById(`terminal-body-${termId}`)
+        || (termId === 1 ? document.getElementById('terminal-body') : null);
+}
+
+function updateRunButton() {
+    const btnRun = document.getElementById('btn-run');
+    if (!btnRun) return;
+
+    const running = state.runningScripts[state.activeTerminalId];
+    btnRun.classList.remove('running', 'abort', 'aborting');
+
+    if (running) {
+        btnRun.classList.add(running.aborting ? 'aborting' : 'abort');
+        btnRun.innerHTML = running.aborting
+            ? '<span style="margin-right: 6px;">x</span> Aborting...'
+            : '<span style="margin-right: 6px;">x</span> Abort';
+        btnRun.title = running.aborting ? 'Aborting script' : 'Abort script';
+        btnRun.setAttribute('aria-label', running.aborting ? 'Aborting script' : 'Abort script');
+    } else {
+        btnRun.innerHTML = RUN_BUTTON_IDLE_HTML;
+        btnRun.title = 'Run Script';
+        btnRun.setAttribute('aria-label', 'Run script');
+    }
+}
+
+async function abortScriptRun(termId = state.activeTerminalId) {
+    const running = state.runningScripts[termId];
+    if (!running) return;
+
+    running.abortRequested = true;
+    running.aborting = true;
+    updateRunButton();
+
+    if (!running.run_id || running.killSent) return;
+
+    running.killSent = true;
+    try {
+        const res = await fetch(API.kill, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ run_id: running.run_id }),
+        });
+
+        if (!res.ok && res.status !== 404) {
+            const data = await res.json().catch(() => ({}));
+            running.killSent = false;
+            running.aborting = false;
+            updateRunButton();
+            notify(data.error || 'Failed to abort script.', 'error');
+        }
+    } catch (e) {
+        running.killSent = false;
+        running.aborting = false;
+        updateRunButton();
+        notify(`Failed to abort script: ${e.message}`, 'error');
+    }
+}
+
 async function runScript(relPath) {
     const termId = state.activeTerminalId;
-    const btnRun = document.getElementById('btn-run');
+    if (state.runningScripts[termId]) return;
     const runStatus = document.getElementById('run-status');
     const resourcePanel = document.getElementById('resource-panel');
 
-    // Set running state
-    if (btnRun) {
-        btnRun.classList.add('running');
-        btnRun.innerHTML = '<span class="spinner" style="margin-right: 6px;"></span> Running...';
-    }
+    let runId = null;
+
+    state.runningScripts[termId] = {
+        run_id: null,
+        relPath,
+        abortRequested: false,
+        aborting: false,
+        killSent: false,
+    };
+    updateRunButton();
+
     if (termId === state.activeTerminalId) {
         runStatus.textContent = 'Executing...';
         runStatus.className = 'run-status running';
@@ -260,7 +332,6 @@ async function runScript(relPath) {
     }
 
     appendToCli(`$ Running script: ${relPath}`, 'system', termId);
-    // Mirror to debugger
     if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('info', `▶ Running script: ${relPath}`, 'script');
 
     // Initialize progress tracker state for this terminal
@@ -301,6 +372,15 @@ async function runScript(relPath) {
             return;
         }
 
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || `Script run failed with HTTP ${res.status}`);
+        }
+
+        if (!res.body) {
+            throw new Error('Script run did not return a stream');
+        }
+
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -320,23 +400,40 @@ async function runScript(relPath) {
                     try {
                         const data = JSON.parse(chunk.substring(6));
 
-                        if (data.type === 'stdout' || data.type === 'error' || data.type === 'system') {
+                        if (data.type === 'started') {
+                            runId = data.run_id;
+                            const running = state.runningScripts[termId];
+                            if (running) {
+                                running.run_id = runId;
+                                if (running.abortRequested) abortScriptRun(termId);
+                            }
+                            updateRunButton();
+                            appendToCli(data.content, 'system', termId);
+                        } else if (data.type === 'stdout' || data.type === 'error' || data.type === 'system') {
                             let cssClass = data.type === 'stdout' ? 'stdout' : (data.type === 'system' ? 'system' : 'stderr');
                             appendToCli(data.content, cssClass, termId);
-                            // Mirror stdout/stderr to debugger
                             if (typeof DebuggerConsole !== 'undefined') {
                                 const dbgType = data.type === 'error' ? 'error' : 'log';
                                 DebuggerConsole.addEntry(dbgType, data.content.trimEnd(), relPath);
                             }
-                        } else if (data.type === 'progress') {
-                            state.runningScripts[termId] = {
-                                step: data.step,
-                                total: data.total,
-                                command: data.command,
-                                status: 'running'
-                            };
-                            if (termId === state.activeTerminalId) {
-                                updateProgressTrackerUI();
+            } else if (data.type === 'progress') {
+                state.runningScripts[termId] = {
+                    step: data.step,
+                    total: data.total,
+                    command: data.command,
+                    status: 'running'
+                };
+                if (termId === state.activeTerminalId) {
+                    updateProgressTrackerUI();
+                }
+            } else if (data.type === 'aborted') {
+                appendToCli(data.content, 'error', termId);
+                if (typeof DebuggerConsole !== 'undefined') {
+                    DebuggerConsole.addEntry('error', `Script aborted (ID: ${data.run_id})`, 'script');
+                }
+                if (termId === state.activeTerminalId) {
+                    runStatus.textContent = 'Aborted';
+                    runStatus.className = 'run-status error';
                             }
                         } else if (data.type === 'metrics') {
                             if (data.success) {
@@ -394,11 +491,14 @@ async function runScript(relPath) {
             }
         }
     } catch (err) {
-        appendToCli(`Error executing script: ${err.message}`, 'stderr', termId);
-        if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `Script error: ${err.message}`, 'script');
-        if (termId === state.activeTerminalId) {
-            runStatus.textContent = 'Error';
-            runStatus.className = 'run-status error';
+        const abortRequested = Boolean(state.runningScripts[termId]?.abortRequested);
+        if (!abortRequested) {
+            appendToCli(`Error executing script: ${err.message}`, 'stderr', termId);
+            if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', `Script error: ${err.message}`, 'script');
+            if (termId === state.activeTerminalId) {
+                runStatus.textContent = 'Error';
+                runStatus.className = 'run-status error';
+            }
         }
         if (state.runningScripts[termId]) {
             state.runningScripts[termId].status = 'failed';
@@ -412,10 +512,8 @@ async function runScript(relPath) {
         }
     } finally {
         refreshExecutionHistoryIfVisible();
-        if (btnRun) {
-            btnRun.classList.remove('running');
-            btnRun.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Run</span>`;
-        }
+        delete state.runningScripts[termId];
+        updateRunButton();
     }
 }
 
@@ -803,15 +901,25 @@ function raisePRFlow(relPath) {
 // 2. Executes the API call to the backend after the modal is submitted
 async function executePR(relPath, branch, message, repoUrl) {
     const btn = document.getElementById('pr-modal-submit');
+    const btnCancel = document.getElementById('pr-modal-cancel');
+    const btnClose = document.getElementById('pr-modal-close');
+    const inputRepo = document.getElementById('pr-repo');
+    const inputBranch = document.getElementById('pr-branch');
+    const inputMsg = document.getElementById('pr-message');
 
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Pushing...';
-    }
-    // Hide modal immediately
-    document
-        .getElementById('pr-modal-overlay')
-        .classList.remove('active');
+    const setControlsDisabled = (disabled) => {
+        if (btn) {
+            btn.disabled = disabled;
+            btn.textContent = disabled ? 'Pushing...' : 'Push / PR';
+        }
+        if (btnCancel) btnCancel.disabled = disabled;
+        if (btnClose) btnClose.disabled = disabled;
+        if (inputRepo) inputRepo.disabled = disabled;
+        if (inputBranch) inputBranch.disabled = disabled;
+        if (inputMsg) inputMsg.disabled = disabled;
+    };
+
+    setControlsDisabled(true);
 
     // Show debugger logs
     if (typeof DebuggerConsole !== 'undefined') {
@@ -881,6 +989,12 @@ async function executePR(relPath, branch, message, repoUrl) {
                 'PR workflow completed successfully.',
                 'success'
             );
+            
+            // Hide modal on success
+            document
+                .getElementById('pr-modal-overlay')
+                .classList.remove('active');
+
             // Offer PR page opening
             if (
                 confirm(
@@ -915,10 +1029,7 @@ async function executePR(relPath, branch, message, repoUrl) {
             'error'
         );
     } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = 'Push / Raise PR';
-        }
+        setControlsDisabled(false);
     }
 }
 async function manageLock(relPath, oldPass, newPass) {
@@ -981,6 +1092,7 @@ async function openReplay(sessionId) {
         overlay.classList.add('active');
 
         playReplay();
+        persistWorkspace();
     } catch (err) {
         console.error(err);
 
@@ -1110,7 +1222,7 @@ function updateProgressTrackerUI() {
 // ─── CLI Helpers ───
 
 function appendToCli(text, className = '', termId = state.activeTerminalId) {
-    const termBody = document.getElementById(`terminal-body-${termId}`) || document.getElementById('terminal-body');
+    const termBody = getTerminalBody(termId);
     if (!termBody) return;
 
     const welcomeEl = termBody.querySelector('.cli-welcome');
@@ -1123,10 +1235,11 @@ function appendToCli(text, className = '', termId = state.activeTerminalId) {
 
     termBody.scrollTop = termBody.scrollHeight;
     highlightTerminalSearch();
+    persistWorkspace();
 }
 
 function clearCli() {
-    const termBody = document.getElementById(`terminal-body-${state.activeTerminalId}`) || document.getElementById('terminal-body');
+    const termBody = getTerminalBody(state.activeTerminalId);
     if (termBody) {
         termBody.innerHTML = '<div class="cli-welcome"><span class="cli-prompt">$</span> <span class="cli-welcome-text">Terminal cleared.</span></div>';
     }
@@ -1376,6 +1489,7 @@ function addTerminal() {
 
     document.getElementById('cli-area').insertBefore(bodyContainer, document.querySelector('.cli-input-bar'));
     switchTerminal(id);
+    persistWorkspace();
     saveSessionDebounced();
 }
 
@@ -1387,11 +1501,26 @@ function switchTerminal(id) {
     if (activeTab) activeTab.classList.add('active');
 
     document.querySelectorAll('.cli-body').forEach(b => b.style.display = 'none');
-    const activeBody = document.getElementById(`terminal-body-${id}`) || (id === 1 ? document.getElementById('terminal-body') : null);
+    const activeBody = getTerminalBody(id);
     if (activeBody) activeBody.style.display = 'block';
 
+    const runStatus = document.getElementById('run-status');
+    const resourcePanel = document.getElementById('resource-panel');
+    const running = state.runningScripts[id];
+    if (running) {
+        runStatus.textContent = running.aborting ? 'Aborting...' : 'Executing...';
+        runStatus.className = 'run-status running';
+        resourcePanel.style.display = 'none';
+    } else {
+        runStatus.textContent = '';
+        runStatus.className = 'run-status';
+    }
+    updateRunButton();
     highlightTerminalSearch();
+
     updateProgressTrackerUI();
+    persistWorkspace();
+
 }
 
 function closeTerminal(id) {
@@ -1401,7 +1530,7 @@ function closeTerminal(id) {
     const tabBtn = document.getElementById(`tab-btn-${id}`) || document.querySelector(`.cli-tab[data-id="${id}"]`);
     if (tabBtn) tabBtn.remove();
 
-    const bodyContainer = document.getElementById(`terminal-body-${id}`) || (id === 1 ? document.getElementById('terminal-body') : null);
+    const bodyContainer = getTerminalBody(id);
     if (bodyContainer) bodyContainer.remove();
 
     if (state.runningScripts && state.runningScripts[id]) {
@@ -1413,6 +1542,7 @@ function closeTerminal(id) {
     } else {
         updateProgressTrackerUI();
     }
+    persistWorkspace();
     saveSessionDebounced();
 }
 
@@ -1662,6 +1792,7 @@ async function selectScript(relPath) {
     // Toolbar states
     const btnFav = document.getElementById('btn-fav');
     if (btnFav) btnFav.classList.toggle('active', script.favorite);
+    updateRunButton();
 
     const btnLock = document.getElementById('btn-lock');
     if (btnLock) {
@@ -1686,6 +1817,8 @@ async function selectScript(relPath) {
     // Animate in
     detailPanel.classList.add('animate-in');
     setTimeout(() => detailPanel.classList.remove('animate-in'), 300);
+
+    persistWorkspace();
 }
 
 function showWelcome() {
@@ -1824,6 +1957,10 @@ function bindEvents() {
         }
     });
 
+    cliInput.addEventListener('input', () => {
+        persistWorkspace();
+    });
+
     // Run Command button
     document.getElementById('btn-run-cmd').addEventListener('click', () => {
         const cmd = cliInput.value.trim();
@@ -1859,7 +1996,15 @@ function bindEvents() {
 
     // Script Details Actions
     const btnRun = document.getElementById('btn-run');
-    if (btnRun) btnRun.addEventListener('click', () => { if (state.activeScript) runScript(state.activeScript); });
+    if (btnRun) {
+        btnRun.addEventListener('click', () => {
+            if (state.runningScripts[state.activeTerminalId]) {
+                abortScriptRun(state.activeTerminalId);
+            } else if (state.activeScript) {
+                runScript(state.activeScript);
+            }
+        });
+    }
 
     const btnEdit = document.getElementById('btn-edit');
     if (btnEdit) btnEdit.addEventListener('click', () => { if (state.activeScript) openModal('edit'); });
@@ -1960,7 +2105,11 @@ function bindEvents() {
     // PR Modal Features
     const prOverlay = document.getElementById('pr-modal-overlay');
     if (prOverlay) {
-        const closePr = () => prOverlay.classList.remove('active');
+        const closePr = () => {
+            const btn = document.getElementById('pr-modal-submit');
+            if (btn && btn.disabled) return; // Prevent closing while operation is in progress
+            prOverlay.classList.remove('active');
+        };
         document.getElementById('pr-modal-close').addEventListener('click', closePr);
         document.getElementById('pr-modal-cancel').addEventListener('click', closePr);
         prOverlay.addEventListener('click', (e) => { if (e.target.id === 'pr-modal-overlay') closePr(); });
@@ -2090,6 +2239,22 @@ function bindEvents() {
                 .getElementById('analytics-modal-overlay')
                 .classList.remove('active');
         });
+
+    document
+        .getElementById('btn-workspaces')
+        ?.addEventListener('click', openWorkspaceManager);
+
+    document
+        .getElementById('workspace-manager-close')
+        ?.addEventListener('click', () => {
+            document
+                .getElementById('workspace-manager-overlay')
+                ?.classList.remove('active');
+        });
+
+    document
+        .getElementById('workspace-save-profile')
+        ?.addEventListener('click', saveWorkspaceProfile);
 }
 
 // ─── Helpers ───────────────────────────────────────────────
@@ -2183,6 +2348,375 @@ function notify(message, type = 'info') {
 // ═══════════════════════════════════════════════════════════
 //  Debugger Console with Smart Suggestions
 // ═══════════════════════════════════════════════════════════
+
+// ─── Workspace Persistence ─────────────────────────────────
+
+function serializeWorkspace() {
+    const terminalSnapshots = state.terminals.map(id => {
+        const terminalBody = document.getElementById(`terminal-body-${id}`);
+        return {
+            id,
+            content: terminalBody?.innerHTML || '',
+            pendingInput: document.getElementById('cli-input')?.value || ''
+        };
+    });
+
+    return {
+        terminals: state.terminals,
+        terminalSnapshots,
+        activeTerminalId: state.activeTerminalId,
+        activeScript: state.activeScript,
+        searchQuery: state.searchQuery,
+        debuggerVisible:
+            typeof DebuggerConsole !== 'undefined'
+                ? DebuggerConsole.visible
+                : false,
+        replayState: {
+            active: !!state.replay?.sessionId
+        }
+    };
+}
+
+async function persistWorkspace() {
+    try {
+        await fetch('/api/workspace', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(serializeWorkspace())
+        });
+    } catch (err) {
+        console.error('Workspace persistence failed:', err);
+    }
+}
+
+async function checkWorkspaceRecovery() {
+    if (state.workspaceRestored) {
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/workspace');
+        const data = await res.json();
+
+        if (data.workspace && data.workspace.corrupted) {
+            notify(
+                'Previous workspace snapshot was corrupted and has been isolated.',
+                'warning'
+            );
+            return;
+        }
+
+        if (!data.workspace || !data.workspace.workspace) {
+            return;
+        }
+
+        const snapshot = data.workspace.workspace;
+
+        const savedAt = data.workspace.saved_at;
+        const modalBody = document.querySelector('#workspace-restore-overlay .modal-body');
+        if (modalBody && savedAt) {
+            const existing = modalBody.querySelector('.workspace-snapshot-meta');
+            if (!existing) {
+                const meta = document.createElement('div');
+                meta.className = 'workspace-snapshot-meta';
+                meta.textContent = `Snapshot saved at: ${savedAt}`;
+                modalBody.appendChild(meta);
+            }
+        }
+
+        document
+            .getElementById('workspace-restore-overlay')
+            ?.classList.add('active');
+
+        document
+            .getElementById('workspace-restore-btn')
+            ?.addEventListener('click', () => {
+                restoreWorkspace(snapshot, 'full');
+            });
+
+        document
+            .getElementById('workspace-safe-btn')
+            ?.addEventListener('click', () => {
+                restoreWorkspace(snapshot, 'safe');
+            });
+
+        document
+            .getElementById('workspace-clean-btn')
+            ?.addEventListener('click', closeWorkspaceRestore);
+
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+function closeWorkspaceRestore() {
+    document
+        .getElementById('workspace-restore-overlay')
+        ?.classList.remove('active');
+}
+
+function sanitizeWorkspaceSnapshot(data) {
+    const snapshot = structuredClone(data);
+
+    if (!Array.isArray(snapshot.terminals)) {
+        snapshot.terminals = [1];
+    }
+
+    if (
+        !snapshot.activeTerminalId ||
+        !snapshot.terminals.includes(snapshot.activeTerminalId)
+    ) {
+        snapshot.activeTerminalId = snapshot.terminals[0] || 1;
+    }
+
+    return snapshot;
+}
+
+function rebuildTerminalWorkspace(terminals, activeTerminalId, dataSnapshots = []) {
+    const tabsContainer = document.getElementById('cli-tabs');
+    const cliArea = document.getElementById('cli-area');
+
+    // Remove existing dynamic tabs (keep btn-add-tab)
+    document.querySelectorAll('.cli-tab').forEach(tab => {
+        if (!tab.id?.includes('btn-add-tab')) {
+            tab.remove();
+        }
+    });
+
+    // Remove existing terminal bodies (keep the original #terminal-body / cli-output)
+    document.querySelectorAll('.cli-body').forEach(body => {
+        if (body.id !== 'cli-output') {
+            body.remove();
+        }
+    });
+
+    // Reset state safely
+    state.terminals = [];
+
+    // Rebuild each terminal
+    terminals.forEach(id => {
+        const tabBtn = document.createElement('div');
+        tabBtn.className = 'cli-tab';
+        tabBtn.dataset.id = id;
+        tabBtn.id = `tab-btn-${id}`;
+        tabBtn.innerHTML = `
+            <span class="cli-tab-title">
+                <span class="dot dot-red"></span>
+                <span class="dot dot-yellow"></span>
+                <span class="dot dot-green"></span>
+                <span>Terminal ${id}</span>
+            </span>
+            <button class="cli-tab-close" title="Close" aria-label="Close terminal">×</button>
+        `;
+        tabBtn.onclick = () => switchTerminal(id);
+        tabBtn.querySelector('.cli-tab-close')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeTerminal(id);
+        });
+        tabsContainer.insertBefore(tabBtn, document.getElementById('btn-add-tab'));
+
+        const bodyContainer = document.createElement('div');
+        bodyContainer.className = 'cli-body';
+        bodyContainer.id = `terminal-body-${id}`;
+        bodyContainer.style.display = 'none';
+        bodyContainer.setAttribute('role', 'log');
+        bodyContainer.setAttribute('aria-live', 'polite');
+        const snapshot = dataSnapshots?.find(snap => snap.id === id);
+        bodyContainer.innerHTML = snapshot?.content ||
+            `<div class="cli-welcome">
+                <span class="cli-prompt">$</span>
+                <span class="cli-welcome-text">Restored terminal session.</span>
+            </div>`;
+        cliArea.insertBefore(bodyContainer, document.querySelector('.cli-input-bar'));
+
+        state.terminals.push(id);
+    });
+
+    // Restore pending input from first snapshot
+    const firstSnapshot = dataSnapshots?.[0];
+    if (firstSnapshot?.pendingInput) {
+        const cliInput = document.getElementById('cli-input');
+        if (cliInput) {
+            cliInput.value = firstSnapshot.pendingInput;
+        }
+    }
+
+    // Activate the correct terminal
+    switchTerminal(activeTerminalId);
+
+    // Advance nextTerminalId past all restored IDs
+    state.nextTerminalId = Math.max(...terminals, 1) + 1;
+}
+
+function restoreWorkspace(snapshot, mode = 'full') {
+    try {
+        const data =
+            mode === 'safe'
+                ? sanitizeWorkspaceSnapshot(snapshot)
+                : snapshot;
+
+        if (Array.isArray(data.terminals)) {
+            rebuildTerminalWorkspace(
+                data.terminals,
+                data.activeTerminalId || 1,
+                data.terminalSnapshots || []
+            );
+        }
+
+        if (data.activeTerminalId) {
+            state.activeTerminalId = data.activeTerminalId;
+        }
+
+        if (mode !== 'safe' && data.activeScript) {
+            selectScript(data.activeScript);
+        }
+
+        if (data.replayState?.active) {
+            notify('Replay session context detected.', 'info');
+        }
+
+        if (
+            data.debuggerVisible &&
+            typeof DebuggerConsole !== 'undefined'
+        ) {
+            DebuggerConsole.show();
+        }
+
+        state.workspaceRestored = true;
+
+        closeWorkspaceRestore();
+
+        notify(`Workspace restored (${mode} mode).`, 'success');
+
+    } catch (err) {
+        console.error(err);
+        notify('Workspace recovery failed.', 'error');
+    }
+}
+
+// ─── Workspace Manager ─────────────────────────────────────
+
+async function openWorkspaceManager() {
+    try {
+        const res = await fetch('/api/workspace/profiles');
+        const data = await res.json();
+
+        const container = document.getElementById('workspace-profile-list');
+
+        if (!data.profiles.length) {
+            container.innerHTML = '<p style="color:var(--text-secondary);margin:0;">No saved profiles yet.</p>';
+        } else {
+            container.innerHTML = data.profiles.map(profile => `
+                <div class="workspace-profile-item">
+                    <span>${escapeHtml(profile)}</span>
+                    <div class="workspace-profile-actions">
+                        <button class="btn" onclick="loadWorkspaceProfile('${escapeHtml(profile)}')">Load</button>
+                        <button class="btn" onclick="deleteWorkspaceProfile('${escapeHtml(profile)}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        document
+            .getElementById('workspace-manager-overlay')
+            .classList.add('active');
+
+    } catch (err) {
+        console.error(err);
+        notify('Failed to load workspace profiles.', 'error');
+    }
+}
+
+async function saveWorkspaceProfile() {
+    const input = document.getElementById('workspace-profile-name');
+    const name = input.value.trim();
+
+    if (!name) {
+        notify('Profile name required.', 'warning');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/workspace/profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, workspace: serializeWorkspace() })
+        });
+
+        const data = await res.json();
+
+        if (!data.success) {
+            notify(data.error, 'error');
+            return;
+        }
+
+        input.value = '';
+        notify('Workspace profile saved.', 'success');
+        openWorkspaceManager();
+
+    } catch (err) {
+        console.error(err);
+        notify('Failed to save workspace profile.', 'error');
+    }
+}
+
+async function loadWorkspaceProfile(name) {
+    try {
+        const res = await fetch(`/api/workspace/profile/${encodeURIComponent(name)}`);
+        const data = await res.json();
+
+        if (!data.success) {
+            notify(data.error, 'error');
+            return;
+        }
+
+        const profile = data.profile;
+
+        if (!profile.workspace) {
+            notify('Invalid workspace profile.', 'error');
+            return;
+        }
+
+        restoreWorkspace(profile.workspace, 'full');
+
+        document
+            .getElementById('workspace-manager-overlay')
+            ?.classList.remove('active');
+
+        notify(`Workspace profile "${name}" loaded.`, 'success');
+
+    } catch (err) {
+        console.error(err);
+        notify('Failed to load workspace profile.', 'error');
+    }
+}
+
+async function deleteWorkspaceProfile(name) {
+    const confirmed = confirm(`Delete workspace profile "${name}"?`);
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/workspace/profile/${encodeURIComponent(name)}`, {
+            method: 'DELETE'
+        });
+
+        const data = await res.json();
+
+        if (!data.success) {
+            notify(data.error, 'error');
+            return;
+        }
+
+        notify('Workspace profile deleted.', 'success');
+        openWorkspaceManager();
+
+    } catch (err) {
+        console.error(err);
+        notify('Failed to delete workspace profile.', 'error');
+    }
+}
 
 const DebuggerConsole = (() => {
     let entries = [];
@@ -2307,6 +2841,7 @@ const DebuggerConsole = (() => {
             const h = panel.offsetHeight;
             document.documentElement.style.setProperty('--debugger-height', h + 'px');
         }
+        persistWorkspace();
     }
 
     function close() {

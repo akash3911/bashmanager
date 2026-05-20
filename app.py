@@ -12,6 +12,7 @@ import hashlib
 import urllib.request
 import urllib.parse
 import re
+import shutil
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, send_from_directory, Response
 
@@ -27,6 +28,12 @@ SESSION_LOG_DIR = os.path.join(LOG_ROOT, 'sessions')
 HISTORY_FILE = os.path.join(LOG_ROOT, 'history.jsonl')
 FAILED_HISTORY_FILE = os.path.join(LOG_ROOT, 'failed.jsonl')
 COMMAND_HISTORY_FILE = os.path.join(LOG_ROOT, 'command_history.json')
+WORKSPACE_DIR = os.path.join(LOG_ROOT, 'workspaces')
+WORKSPACE_STATE_FILE = os.path.join(WORKSPACE_DIR, 'workspace_state.json')
+WORKSPACE_PROFILE_DIR = os.path.join(WORKSPACE_DIR, 'profiles')
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
+os.makedirs(WORKSPACE_PROFILE_DIR, exist_ok=True)
+
 SESSIONS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     'sessions.json'
@@ -37,8 +44,83 @@ MAX_EXECUTION_LOG_FILES = 250
 LOG_RETENTION_DAYS = 30
 MAX_HISTORY_EXCERPT_CHARS = 2000
 
-# Store running/completed processes for resource monitoring
-processes = {}
+# Thread-safe registry for running script processes (keyed by run_id)
+active_processes = {}
+active_processes_lock = threading.Lock()
+
+
+def validate_workspace_snapshot(data):
+    if not isinstance(data, dict):
+        return False, 'Workspace snapshot must be an object'
+
+    terminals = data.get('terminals')
+    if terminals is not None and not isinstance(terminals, list):
+        return False, 'Invalid terminals structure'
+
+    active_terminal = data.get('activeTerminalId')
+    if active_terminal is not None and not isinstance(active_terminal, int):
+        return False, 'Invalid active terminal'
+
+    version = data.get('version')
+    if version is not None and not isinstance(version, int):
+        return False, 'Invalid snapshot version'
+
+    active_script = data.get('activeScript')
+    if active_script is not None and not isinstance(active_script, str):
+        return False, 'Invalid active script reference'
+
+    return True, None
+
+
+def load_workspace_state():
+    if not os.path.exists(WORKSPACE_STATE_FILE):
+        return None
+    try:
+        with open(WORKSPACE_STATE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        corrupted_path = WORKSPACE_STATE_FILE + '.corrupted'
+        try:
+            shutil.move(WORKSPACE_STATE_FILE, corrupted_path)
+        except Exception:
+            pass
+        return {
+            'corrupted': True,
+            'error': str(e)
+        }
+
+
+def save_workspace_state(data):
+    valid, error = validate_workspace_snapshot(data)
+    if not valid:
+        return False, error
+
+    payload = {
+        'version': 2,
+        'saved_at': datetime.now(timezone.utc).isoformat(),
+        'workspace': data
+    }
+
+    try:
+        with open(WORKSPACE_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2)
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def get_workspace_profile_path(name):
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+    return os.path.join(WORKSPACE_PROFILE_DIR, f'{safe_name}.json')
+
+
+def list_workspace_profiles():
+    profiles = []
+    for file in os.listdir(WORKSPACE_PROFILE_DIR):
+        if not file.endswith('.json'):
+            continue
+        profiles.append(file[:-5])
+    return sorted(profiles)
 
 
 def _ensure_log_dirs():
@@ -424,6 +506,12 @@ def check_lock(rel_path, provided_pass):
             return False
     return True
 
+def is_safe_path(base_dir, target_path):
+    base_dir = os.path.abspath(base_dir)
+    target_path = os.path.abspath(target_path)
+
+    return os.path.commonpath([base_dir, target_path]) == base_dir
+
 
 def parse_script_metadata(filepath):
     """Parse metadata from script comment headers."""
@@ -657,6 +745,90 @@ def get_session(session_id):
 
     return jsonify(data)
 
+
+@app.route('/api/workspace', methods=['GET'])
+def get_workspace_state():
+    data = load_workspace_state()
+    return jsonify({
+        'success': True,
+        'workspace': data
+    })
+
+
+@app.route('/api/workspace', methods=['POST'])
+def persist_workspace_state():
+    data = request.json or {}
+    success, error = save_workspace_state(data)
+    return jsonify({
+        'success': success,
+        'error': error
+    })
+
+
+@app.route('/api/workspace/profile', methods=['POST'])
+def save_workspace_profile():
+    data = request.json or {}
+    name = data.get('name', '').strip()
+    workspace = data.get('workspace')
+
+    if not name:
+        return jsonify({'success': False, 'error': 'Profile name required'}), 400
+
+    valid, error = validate_workspace_snapshot(workspace)
+    if not valid:
+        return jsonify({'success': False, 'error': error}), 400
+
+    profile_path = get_workspace_profile_path(name)
+    payload = {
+        'version': 2,
+        'saved_at': datetime.now(timezone.utc).isoformat(),
+        'profile_name': name,
+        'workspace': workspace
+    }
+
+    try:
+        with open(profile_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/workspace/profiles', methods=['GET'])
+def get_workspace_profiles():
+    return jsonify({
+        'success': True,
+        'profiles': list_workspace_profiles()
+    })
+
+
+@app.route('/api/workspace/profile/<name>', methods=['GET'])
+def load_workspace_profile(name):
+    profile_path = get_workspace_profile_path(name)
+    if not os.path.exists(profile_path):
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+
+    try:
+        with open(profile_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return jsonify({'success': True, 'profile': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/workspace/profile/<name>', methods=['DELETE'])
+def delete_workspace_profile(name):
+    profile_path = get_workspace_profile_path(name)
+    if not os.path.exists(profile_path):
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+
+    try:
+        os.remove(profile_path)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/scripts/content', methods=['POST'])
 def get_script_content():
     data = request.json or {}
@@ -670,7 +842,7 @@ def get_script_content():
     full_path = os.path.normpath(full_path)
 
     # Security check
-    if not full_path.startswith(os.path.normpath(SCRIPTS_DIR)):
+    if not is_safe_path(SCRIPTS_DIR, full_path):
         return jsonify({'error': 'Invalid path'}), 403
 
     if not os.path.exists(full_path):
@@ -794,6 +966,42 @@ def instrument_script(content):
         instrumented_lines.append(line)
         
     return '\n'.join(instrumented_lines), steps
+def _terminate_process_tree(proc, timeout=3):
+    if proc.poll() is not None:
+        return
+
+    try:
+        parent = psutil.Process(proc.pid)
+        processes = [parent] + parent.children(recursive=True)
+        for process in processes:
+            try:
+                process.terminate()
+            except psutil.NoSuchProcess:
+                pass
+
+        _, alive = psutil.wait_procs(processes, timeout=timeout)
+        for process in alive:
+            try:
+                process.kill()
+            except psutil.NoSuchProcess:
+                pass
+
+        if alive:
+            psutil.wait_procs(alive, timeout=2)
+    except psutil.NoSuchProcess:
+        pass
+    except Exception:
+        try:
+            proc.terminate()
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    try:
+        proc.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=1)
 
 
 @app.route('/api/scripts/run', methods=['POST'])
@@ -809,7 +1017,7 @@ def run_script():
     full_path = os.path.normpath(full_path)
 
     # Security check
-    if not full_path.startswith(os.path.normpath(SCRIPTS_DIR)):
+    if not is_safe_path(SCRIPTS_DIR, full_path):
         return jsonify({'error': 'Invalid path'}), 403
 
     if not os.path.exists(full_path):
@@ -829,23 +1037,40 @@ def run_script():
         proc = None
         run_path = full_path
         start_time = time.time()
-        try:
+                try:
             # Instrument script content for progress tracking
             try:
                 with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
+
                 instrumented_content, steps = instrument_script(content)
+
                 if steps:
                     temp_dir = os.path.dirname(full_path)
-                    temp_fd, temp_path = tempfile.mkstemp(suffix='.sh', prefix='.tmp_run_', dir=temp_dir)
+                    temp_fd, temp_path = tempfile.mkstemp(
+                        suffix='.sh',
+                        prefix='.tmp_run_',
+                        dir=temp_dir
+                    )
                     with os.fdopen(temp_fd, 'w', encoding='utf-8', newline='\n') as temp_f:
                         temp_f.write(instrumented_content)
+                    
                     run_path = temp_path
+                else:
+                    run_path = full_path
+
             except Exception:
                 run_path = full_path
 
+            # Use main's Windows support with your run_path
+            args = (
+                [shell_cmd, run_path]
+                if shell_cmd != 'cmd.exe'
+                else ['cmd.exe', '/c', run_path]
+            )
+
             proc = subprocess.Popen(
-                [shell_cmd, run_path],
+                args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -854,13 +1079,21 @@ def run_script():
                 universal_newlines=True
             )
 
+            with active_processes_lock:
+                active_processes[run_id] = {
+                    'process': proc,
+                    'execution': execution,
+                    'start_time': start_time,
+                    'status': 'running',
+                    'aborted': False,
+                }
+
             metrics = {'cpu': 0.0, 'mem': 0.0}
             t_metrics = threading.Thread(target=_track_metrics, args=(proc, metrics))
             t_metrics.start()
 
             _append_execution_line(execution, 'system', f'Starting script execution... (ID: {run_id})')
-            start_message = f'Starting script execution... (ID: {run_id})\n'
-            yield f"data: {json.dumps({'type': 'system', 'content': start_message})}\n\n"
+            yield f"data: {json.dumps({'type': 'started', 'run_id': run_id, 'content': f'Starting script execution... (ID: {run_id})\n'})}\n\n"
 
             for line in iter(proc.stdout.readline, ''):
                 if line:
@@ -890,31 +1123,79 @@ def run_script():
             proc.stdout.close()
             proc.wait(timeout=10)
             t_metrics.join(timeout=1)
-            
+
             end_time = time.time()
             elapsed = end_time - start_time
-            system_mem = psutil.virtual_memory().total / (1024 * 1024)
-            mem_percent = (metrics['mem'] / system_mem * 100) if system_mem > 0 else 0
 
-            resource_info = {
-                'execution_time': round(elapsed, 3),
-                'execution_time_formatted': _format_time(elapsed),
-                'exit_code': proc.returncode,
-                'cpu_percent': metrics['cpu'],
-                'memory_used_mb': metrics['mem'],
-                'memory_total_mb': round(system_mem, 1),
-                'memory_percent': round(mem_percent, 2),
-            }
+            was_aborted = False
+            with active_processes_lock:
+                entry = active_processes.get(run_id)
+                if entry and entry.get('aborted'):
+                    was_aborted = True
 
-            _append_execution_line(execution, 'system', f'Script completed with exit code {proc.returncode}')
-            _finalize_execution(
-                execution,
-                success=proc.returncode == 0,
-                exit_code=proc.returncode,
-                duration_seconds=elapsed,
-                resources=resource_info,
-            )
-            yield f"data: {json.dumps({'type': 'metrics', 'resources': resource_info, 'exit_code': proc.returncode, 'success': proc.returncode == 0})}\n\n"
+            if was_aborted:
+                _append_execution_line(execution, 'system', f'Script aborted (exit code {proc.returncode})')
+                _finalize_execution(
+                    execution,
+                    success=False,
+                    exit_code=proc.returncode if proc.returncode is not None else -15,
+                    duration_seconds=elapsed,
+                    error_message='Script aborted by user',
+                )
+                yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'content': 'Script aborted\n'})}\n\n"
+            else:
+                system_mem = psutil.virtual_memory().total / (1024 * 1024)
+                mem_percent = (metrics['mem'] / system_mem * 100) if system_mem > 0 else 0
+
+                resource_info = {
+                    'execution_time': round(elapsed, 3),
+                    'execution_time_formatted': _format_time(elapsed),
+                    'exit_code': proc.returncode,
+                    'cpu_percent': metrics['cpu'],
+                    'memory_used_mb': metrics['mem'],
+                    'memory_total_mb': round(system_mem, 1),
+                    'memory_percent': round(mem_percent, 2),
+                }
+
+                _append_execution_line(execution, 'system', f'Script completed with exit code {proc.returncode}')
+                _finalize_execution(
+                    execution,
+                    success=proc.returncode == 0,
+                    exit_code=proc.returncode,
+                    duration_seconds=elapsed,
+                    resources=resource_info,
+                )
+                yield f"data: {json.dumps({'type': 'metrics', 'resources': resource_info, 'exit_code': proc.returncode, 'success': proc.returncode == 0})}\n\n"
+        except subprocess.TimeoutExpired:
+            was_aborted = False
+            with active_processes_lock:
+                entry = active_processes.get(run_id)
+                if entry and entry.get('aborted'):
+                    was_aborted = True
+
+            if proc:
+                _terminate_process_tree(proc)
+
+            if was_aborted:
+                _append_execution_line(execution, 'system', f'Script aborted (exit code {proc.returncode})')
+                _finalize_execution(
+                    execution,
+                    success=False,
+                    exit_code=proc.returncode if proc and proc.returncode is not None else -15,
+                    duration_seconds=time.time() - start_time,
+                    error_message='Script aborted by user',
+                )
+                yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'content': 'Script aborted\n'})}\n\n"
+            else:
+                _append_execution_line(execution, 'error', '❌ Execution timed out')
+                _finalize_execution(
+                    execution,
+                    success=False,
+                    exit_code=-1,
+                    duration_seconds=time.time() - start_time,
+                    error_message='Process timed out',
+                )
+                yield f"data: {json.dumps({'type': 'error', 'content': '❌ Execution timed out\n'})}\n\n"
         except Exception as e:
             _append_execution_line(execution, 'error', f'❌ Execution Error: {str(e)}')
             if proc is not None and getattr(proc, 'returncode', None) is not None:
@@ -936,8 +1217,33 @@ def run_script():
                         os.remove(run_path)
                 except Exception:
                     pass
+            with active_processes_lock:
+                if run_id in active_processes:
+                    del active_processes[run_id]
 
     return Response(generate(), mimetype='text/event-stream')
+
+
+@app.route('/api/scripts/kill', methods=['POST'])
+def kill_script():
+    data = request.json or {}
+    run_id = data.get('run_id', '')
+
+    if not run_id:
+        return jsonify({'error': 'run_id is required'}), 400
+
+    with active_processes_lock:
+        entry = active_processes.get(run_id)
+        if not entry:
+            return jsonify({'error': 'No running process found for this run_id'}), 404
+        proc = entry['process']
+        if proc.poll() is not None:
+            return jsonify({'error': 'No running process found for this run_id'}), 404
+        entry['aborted'] = True
+
+    _terminate_process_tree(proc)
+
+    return jsonify({'success': True, 'run_id': run_id})
 
 
 @app.route('/api/exec', methods=['POST'])
@@ -1098,7 +1404,7 @@ def delete_script():
     full_path = os.path.join(SCRIPTS_DIR, rel_path)
     full_path = os.path.normpath(full_path)
 
-    if not full_path.startswith(os.path.normpath(SCRIPTS_DIR)):
+    if not is_safe_path(SCRIPTS_DIR, full_path):
         return jsonify({'error': 'Invalid path'}), 403
 
     if os.path.exists(full_path):
@@ -1175,7 +1481,13 @@ def import_github():
 
     # Convert standard GitHub URL → raw URL
     if "github.com" in url and "/blob/" in url:
-        url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+        url = (
+            url.replace(
+                "github.com",
+                "raw.githubusercontent.com"
+            )
+            .replace("/blob/", "/")
+        )
 
     # SSRF guard: only allow GitHub domains after rewrite
     _parsed = urllib.parse.urlparse(url)
@@ -1275,7 +1587,7 @@ def raise_pr():
     full_path = os.path.normpath(full_path)
 
     # Security check: prevent path traversal outside scripts directory
-    if not full_path.startswith(os.path.normpath(SCRIPTS_DIR)):
+    if not is_safe_path(SCRIPTS_DIR, full_path):
         return jsonify({'error': 'Invalid path'}), 403
 
     try:

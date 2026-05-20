@@ -28,6 +28,15 @@ function createWindow() {
         }
     });
 
+    // Intercept window.open calls and route external links to the default system browser
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        if (url.startsWith(`http://${HOST}:${PORT}`) || url.startsWith('http://localhost:5000') || !url.startsWith('http')) {
+            return { action: 'allow' }; // Allow internal links/windows (like logs viewer)
+        }
+        require('electron').shell.openExternal(url);
+        return { action: 'deny' }; // Prevent opening inside unstable Electron child windows
+    });
+
     // We keep trying to load the URL until Flask is ready
     loadWhenReady(`http://${HOST}:${PORT}`);
 
