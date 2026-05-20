@@ -837,15 +837,25 @@ function raisePRFlow(relPath) {
 // 2. Executes the API call to the backend after the modal is submitted
 async function executePR(relPath, branch, message, repoUrl) {
     const btn = document.getElementById('pr-modal-submit');
+    const btnCancel = document.getElementById('pr-modal-cancel');
+    const btnClose = document.getElementById('pr-modal-close');
+    const inputRepo = document.getElementById('pr-repo');
+    const inputBranch = document.getElementById('pr-branch');
+    const inputMsg = document.getElementById('pr-message');
 
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Pushing...';
-    }
-    // Hide modal immediately
-    document
-        .getElementById('pr-modal-overlay')
-        .classList.remove('active');
+    const setControlsDisabled = (disabled) => {
+        if (btn) {
+            btn.disabled = disabled;
+            btn.textContent = disabled ? 'Pushing...' : 'Push / PR';
+        }
+        if (btnCancel) btnCancel.disabled = disabled;
+        if (btnClose) btnClose.disabled = disabled;
+        if (inputRepo) inputRepo.disabled = disabled;
+        if (inputBranch) inputBranch.disabled = disabled;
+        if (inputMsg) inputMsg.disabled = disabled;
+    };
+
+    setControlsDisabled(true);
 
     // Show debugger logs
     if (typeof DebuggerConsole !== 'undefined') {
@@ -915,6 +925,12 @@ async function executePR(relPath, branch, message, repoUrl) {
                 'PR workflow completed successfully.',
                 'success'
             );
+            
+            // Hide modal on success
+            document
+                .getElementById('pr-modal-overlay')
+                .classList.remove('active');
+
             // Offer PR page opening
             if (
                 confirm(
@@ -949,10 +965,7 @@ async function executePR(relPath, branch, message, repoUrl) {
             'error'
         );
     } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = 'Push / Raise PR';
-        }
+        setControlsDisabled(false);
     }
 }
 async function manageLock(relPath, oldPass, newPass) {
@@ -1974,7 +1987,11 @@ function bindEvents() {
     // PR Modal Features
     const prOverlay = document.getElementById('pr-modal-overlay');
     if (prOverlay) {
-        const closePr = () => prOverlay.classList.remove('active');
+        const closePr = () => {
+            const btn = document.getElementById('pr-modal-submit');
+            if (btn && btn.disabled) return; // Prevent closing while operation is in progress
+            prOverlay.classList.remove('active');
+        };
         document.getElementById('pr-modal-close').addEventListener('click', closePr);
         document.getElementById('pr-modal-cancel').addEventListener('click', closePr);
         prOverlay.addEventListener('click', (e) => { if (e.target.id === 'pr-modal-overlay') closePr(); });
