@@ -3144,6 +3144,13 @@ const DebuggerConsole = (() => {
     let debugHistory = [];
     let debugHistoryIdx = -1;
     let isOpen = false;
+    let hasShownWarning = false;
+
+    const BLOCKED_PATTERNS = [
+        'fetch(', 'XMLHttpRequest', 'document.cookie', 'localStorage',
+        'sessionStorage', 'indexedDB', 'Worker(', 'new Function(',
+        'new WebSocket(', 'import(', 'require(',
+    ];
 
     const ICONS_DBG = {
         log: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`,
@@ -3263,6 +3270,10 @@ const DebuggerConsole = (() => {
         if (isOpen) {
             const h = panel.offsetHeight;
             document.documentElement.style.setProperty('--debugger-height', h + 'px');
+            if (!hasShownWarning) {
+                hasShownWarning = true;
+                addEntry('warn', '⚠ Debugger Console has full access to the app state (state, DOM, fetch, etc.). Avoid pasting untrusted code.', 'security');
+            }
         }
         persistWorkspace();
     }
@@ -3394,9 +3405,14 @@ const DebuggerConsole = (() => {
 
         if (expr.trim() === 'clear') { clearConsole(); return; }
 
-        // JS expression evaluator only
+        if (BLOCKED_PATTERNS.some(p => expr.includes(p))) {
+            addEntry('warn', '⚠ Expression blocked — contains restricted API call.', 'security');
+            return;
+        }
+
         try {
-            const result = eval(expr); // eslint-disable-line no-eval
+            const sandboxed = new Function('state', `"use strict"; return (${expr})`);
+            const result = sandboxed(state);
             const output = (result === null) ? 'null' :
                 (result === undefined) ? 'undefined' :
                     typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
