@@ -21,6 +21,16 @@ The project follows a hybrid architecture easily packaged into standalone deskto
 - **Backend API:** Python (`Flask`). Handles file system I/O, cryptographic locking, OS subprocess management, and resource monitoring (`psutil`).
 - **Desktop Wrapper:** Electron. The application supports running as a native desktop application through Electron and `electron-builder`.
 
+## Security Specifications
+
+To protect locked scripts from unauthorized access, DevShell uses a secure password storage and verification mechanism:
+
+- **Algorithm**: PBKDF2-HMAC-SHA256
+- **Salt**: 16-byte cryptographically secure random salt generated via `secrets.token_bytes()`
+- **Iterations**: 100,000 rounds of key stretching to prevent brute-force attacks
+- **Verification**: Constant-time comparison using `hmac.compare_digest()` to eliminate timing attack vectors
+- **Backward Compatibility**: Existing users with legacy unsalted SHA-256 hashes are automatically migrated to the secure PBKDF2 format after their first successful unlock.
+
 ## Prerequisites
 
 - Python 3.8+
