@@ -16,6 +16,7 @@ import urllib.request
 import urllib.parse
 import re
 import shutil
+import urllib.error
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, send_from_directory, Response
 
@@ -1569,7 +1570,16 @@ def manage_lock():
     save_locks(locks)
     return jsonify({'success': True, 'locked': bool(new_pass)})
 
-
+class BlockRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            newurl,
+            code,
+            "Redirects are not allowed",
+            headers,
+            fp
+        )
+        
 @app.route('/api/scripts/import_github', methods=['POST'])
 def import_github():
     data = request.json
@@ -1605,7 +1615,9 @@ def import_github():
 
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 DevShell'})
-        with urllib.request.urlopen(req, timeout=10) as response:
+        opener = urllib.request.build_opener(BlockRedirectHandler)
+
+        with opener.open(req, timeout=10) as response:
             raw_bytes = response.read()
 
         # Prevent huge imports
