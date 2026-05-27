@@ -2,7 +2,7 @@ from importlib import resources
 import os
 import json
 import time
-import subprocess
+import subprocess  # nosec B404 - required for controlled process execution
 import tempfile
 import threading
 import queue
@@ -144,7 +144,7 @@ def load_workspace_state():
         corrupted_path = WORKSPACE_STATE_FILE + '.corrupted'
         try:
             shutil.move(WORKSPACE_STATE_FILE, corrupted_path)
-        except Exception:
+        except Exception:  # nosec B110 - best effort cleanup
             pass
         return {
             'corrupted': True,
@@ -2260,7 +2260,7 @@ def check_lock(rel_path: str, provided_pass: str) -> bool:
                     new_hash = generate_password_hash(provided_pass)
                     locks[rel_path] = new_hash
                     save_locks(locks)
-                except Exception:
+                except Exception:  # nosec B110 - best effort migration
                     pass
                 return True
             return False
@@ -2292,7 +2292,7 @@ def parse_script_metadata(filepath):
                     metadata['tag'] = line[6:].strip()
                 elif not line.startswith('#') and line:
                     break
-    except Exception:
+    except Exception:  # nosec B110 - metadata parsing is best effort
         pass
     return metadata
 
@@ -3015,7 +3015,7 @@ def run_script():
                 else ['cmd.exe', '/c', run_path]
             )
 
-            proc = subprocess.Popen(
+            proc = subprocess.Popen(  # nosec B603 - intentional local script execution
                 args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -3166,7 +3166,7 @@ def run_script():
                 try:
                     if os.path.exists(run_path):
                         os.remove(run_path)
-                except Exception:
+                except Exception:  # nosec B110 - temp cleanup is best effort
                     pass
             with active_processes_lock:
                 if run_id in active_processes:
@@ -3223,7 +3223,7 @@ def exec_command():
             # Need to format for Windows/Linux subshells correctly
             args = [shell_cmd, '-c', command] if shell_cmd != 'cmd.exe' else ['cmd.exe', '/c', command]
             
-            proc = subprocess.Popen(
+            proc = subprocess.Popen(  # nosec B603 - intentional local command execution
                 args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -3538,31 +3538,31 @@ def raise_pr():
 
     try:
         # Check if we are in a git repo
-        subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], check=True, capture_output=True, shell=False)
+        subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], check=True, capture_output=True, shell=False)  # nosec B603,B607 - trusted git invocation
         
         # 1. Create new local branch for the contribution
-        checkout_existing = subprocess.run(['git', 'checkout', branch_name], capture_output=True, shell=False)
+        checkout_existing = subprocess.run(['git', 'checkout', branch_name], capture_output=True, shell=False)  # nosec B603,B607 - trusted git invocation
         if checkout_existing.returncode != 0:
-            subprocess.run(['git', 'checkout', '-b', branch_name], check=True, capture_output=True, shell=False)
+            subprocess.run(['git', 'checkout', '-b', branch_name], check=True, capture_output=True, shell=False)  # nosec B603,B607 - trusted git invocation
         
         # 2. Stage only the specific script file
-        subprocess.run(['git', 'add', full_path], check=True, capture_output=True, shell=False)
+        subprocess.run(['git', 'add', full_path], check=True, capture_output=True, shell=False)  # nosec B603,B607 - trusted git invocation
         
         # 3. Commit the changes
-        subprocess.run(['git', 'commit', '-m', commit_msg], check=True, capture_output=True, shell=False)
+        subprocess.run(['git', 'commit', '-m', commit_msg], check=True, capture_output=True, shell=False)  # nosec B603,B607 - trusted git invocation
         
         # 4. Push to target remote
         # If the user provided a specific target repository URL, we push directly to it.
         # Otherwise, we push to the default 'origin'.
         remote_to_push = target_repo if target_repo else 'origin'
-        subprocess.run(['git', 'push', '-u', remote_to_push, branch_name], check=True, capture_output=True, shell=False)
+        subprocess.run(['git', 'push', '-u', remote_to_push, branch_name], check=True, capture_output=True, shell=False)  # nosec B603,B607 - trusted git invocation
         
         # 5. Generate a GitHub PR Link
         # If an external repo URL was provided, use that to construct the base URL.
         if target_repo:
             remote_url = target_repo.replace('.git', '')
         else:
-            remote_res = subprocess.run(['git', 'remote', 'get-url', 'origin'], check=True, capture_output=True, text=True, shell=False)
+            remote_res = subprocess.run(['git', 'remote', 'get-url', 'origin'], check=True, capture_output=True, text=True, shell=False)  # nosec B603,B607 - trusted git invocation
             remote_url = remote_res.stdout.strip().replace('.git', '')
             
         if remote_url.startswith('git@github.com:'):
@@ -3573,7 +3573,7 @@ def raise_pr():
         
         # 6. Switch back to the main branch to keep the workspace stable
         default_branch = get_default_branch()
-        subprocess.run(['git', 'checkout', default_branch], check=True, capture_output=True, shell=False)
+        subprocess.run(['git', 'checkout', default_branch], check=True, capture_output=True, shell=False)  # nosec B603,B607 - trusted git invocation
         
         return jsonify({'success': True, 'pr_url': pr_url, 'branch': branch_name})
         
@@ -3581,7 +3581,7 @@ def raise_pr():
         err_msg = e.stderr.decode() if e.stderr else str(e)
         # Attempt recovery to main
         default_branch = get_default_branch()
-        subprocess.run(['git', 'checkout', default_branch], capture_output=True, shell=False)
+        subprocess.run(['git', 'checkout', default_branch], capture_output=True, shell=False)  # nosec B603,B607 - trusted git invocation
         return jsonify({'error': err_msg, 'success': False}), 500
     except Exception as e:
         return jsonify({'error': str(e), 'success': False}), 500
@@ -3613,7 +3613,7 @@ def _find_shell():
 
 def get_default_branch():
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603,B607 - trusted git invocation
             ['git', 'symbolic-ref', 'refs/remotes/origin/HEAD'],
             capture_output=True,
             text=True,
