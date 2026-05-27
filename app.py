@@ -2327,6 +2327,41 @@ def get_all_scripts():
 
     return categories
 
+# ─── Security Enhancements ──────────────────────────────────────────
+
+@app.before_request
+def enforce_security():
+    from flask import abort
+    from urllib.parse import urlparse
+
+    # 1. Host Validation (prevents DNS Rebinding)
+    host_only = request.host.split(':')[0]
+    if host_only not in ('127.0.0.1', 'localhost'):
+        abort(403)
+
+    # 2. Origin/Referer Validation (prevents CSRF)
+    if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
+        origin = request.headers.get('Origin')
+        referer = request.headers.get('Referer')
+        
+        def is_valid_local(url):
+            try:
+                parsed = urlparse(url)
+                return parsed.hostname in ('127.0.0.1', 'localhost')
+            except Exception:
+                return False
+
+        if origin:
+            if not is_valid_local(origin):
+                abort(403)
+        elif referer:
+            if not is_valid_local(referer):
+                abort(403)
+        else:
+            # Reject if neither is present and request is from a browser
+            user_agent = request.headers.get('User-Agent', '')
+            if any(b in user_agent for b in ['Mozilla', 'Chrome', 'Safari', 'Edge']):
+                abort(403)
 
 # ─── Routes ───────────────────────────────────────────────────────
 
