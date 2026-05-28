@@ -2744,14 +2744,14 @@ def get_workspace_state():
 
 @app.route("/api/workspace", methods=["POST"])
 def persist_workspace_state():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     success, error = save_workspace_state(data)
     return jsonify({"success": success, "error": error})
 
 
 @app.route("/api/workspace/profile", methods=["POST"])
 def save_workspace_profile():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     name = data.get("name", "").strip()
     workspace = data.get("workspace")
 
@@ -2812,7 +2812,7 @@ def delete_workspace_profile(name):
 
 @app.route("/api/scripts/content", methods=["POST"])
 def get_script_content():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     rel_path = data.get("path", "")
     password = data.get("password", "")
 
@@ -3180,7 +3180,7 @@ def _cleanup_execution(
 
 @app.route("/api/scripts/run", methods=["POST"])
 def run_script():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     rel_path = data.get("path", "")
     password = data.get("password", "")
 
@@ -3526,7 +3526,7 @@ def run_script():
 
 @app.route("/api/scripts/kill", methods=["POST"])
 def kill_script():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     run_id = data.get("run_id", "")
 
     if not run_id:
@@ -3548,7 +3548,7 @@ def kill_script():
 
 @app.route("/api/exec", methods=["POST"])
 def exec_command():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     command = data.get("command", "")
 
     if not command:
@@ -3751,7 +3751,7 @@ def exec_command():
 
 @app.route("/api/sessions/save", methods=["POST"])
 def save_session():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     session_data = data.get("session", {})
 
     try:
@@ -3781,7 +3781,7 @@ def restore_session():
 
 @app.route("/api/scripts/save", methods=["POST"])
 def save_script():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     category = data.get("category", "").strip()
     filename = data.get("filename", "").strip()
     content = data.get("content", "")
@@ -3815,7 +3815,7 @@ def save_script():
 
 @app.route("/api/scripts/delete", methods=["DELETE"])
 def delete_script():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     rel_path = request.args.get("path", "") or data.get("path", "")
     provided_pass = data.get("password", "")
 
@@ -3843,7 +3843,7 @@ def delete_script():
 
 @app.route("/api/scripts/favorite", methods=["POST"])
 def toggle_favorite():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     rel_path = data.get("path", "")
     favs = load_favorites()
 
@@ -3860,7 +3860,7 @@ def toggle_favorite():
 
 @app.route("/api/scripts/lock", methods=["POST"])
 def manage_lock():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     rel_path = data.get("path", "")
     old_pass = data.get("old_password", "")
     new_pass = data.get("new_password", "")  # empty string removes lock!
@@ -3891,7 +3891,7 @@ class BlockRedirectHandler(urllib.request.HTTPRedirectHandler):
         
 @app.route('/api/scripts/import_github', methods=['POST'])
 def import_github():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     url = data.get("url", "").strip()
     category = data.get("category", "").strip()
     filename = data.get("filename", "").strip()
@@ -3983,7 +3983,7 @@ def import_github():
 @app.route("/api/git/pr", methods=["POST"])
 def raise_pr():
     # Parse the request payload for the script path, branch, commit message, and optional target repo
-    data = request.json
+    data = request.get_json(silent=True) or {}
     rel_path = data.get("path", "")
     branch_name = data.get("branch", f"script-contribution-{str(uuid.uuid4())[:4]}")
     commit_msg = data.get("message", f"Contribution: {rel_path}")
