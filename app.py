@@ -2327,6 +2327,9 @@ def get_all_scripts():
                     rel_path = f"{category}/{script_file}"
                     meta = parse_script_metadata(full_path)
                     meta["file"] = script_file
+                    # Ensure a display name exists; fall back to filename when metadata is missing
+                    if not meta.get("name"):
+                        meta["name"] = script_file
                     meta["category"] = category
                     meta["relative_path"] = rel_path
                     meta["favorite"] = rel_path in favorites

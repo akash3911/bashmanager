@@ -31,6 +31,7 @@ let state = {
     scripts: {},
     activeScript: null,
     expandedCategories: new Set(),
+    expandedRoot: true,
     searchQuery: '',
     cmdHistory: [],
     cmdHistoryIndex: -1,
@@ -2821,8 +2822,8 @@ function renderSidebar() {
         const isExpanded = state.expandedCategories.has(cat) || !!query;
 
         html += `
-            <div class="category-header" role="button" tabindex="0" aria-expanded="${isExpanded}" onclick="toggleCategory('${cat}')" onkeydown="handleKeyboardAction(event, () => toggleCategory('${cat}'))">
-                <div class="category-header" onclick="toggleCategory('${cat}')">
+            <div class="category">
+                <div class="category-header" role="button" tabindex="0" aria-expanded="${isExpanded}" onclick="toggleCategory('${cat}')" onkeydown="handleKeyboardAction(event, () => toggleCategory('${cat}'))">
                     <span class="category-arrow ${isExpanded ? 'expanded' : ''}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                     </span>
@@ -2833,6 +2834,7 @@ function renderSidebar() {
                 <ul class="script-list ${isExpanded ? '' : 'collapsed'}" style="max-height: ${filteredScripts.length * 44}px;">
                     ${filteredScripts.map(s => {
             let lockIcon = s.locked ? `<span class="script-item-icon" style="color: var(--accent-orange); margin-right: 4px;">${ICONS.lock}</span>` : '';
+            const displayName = ((s.name || '') + '').trim() || s.file || (s.relative_path || '').split('/').pop() || '';
 
             return `
                         <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}" role="button" tabindex="0"
@@ -2841,7 +2843,7 @@ function renderSidebar() {
                             title="${escapeAttr(s.desc)}">
                             ${lockIcon}
                             <span class="script-item-icon" style="${s.locked ? 'display:none;' : ''}">${ICONS.script}</span>
-                            <span class="script-item-name">${escapeHtml(s.name)}</span>
+                            <span class="script-item-name">${escapeHtml(displayName)}</span>
                             <span class="script-item-fav ${s.favorite ? 'visible' : ''}"
                                   onclick="event.stopPropagation(); toggleFavorite('${s.relative_path}')">
                                 ${ICONS.favorite}
@@ -2856,19 +2858,40 @@ function renderSidebar() {
         scripts.forEach(s => { if (s.favorite) favScripts.push(s); });
     }
 
-    tree.innerHTML = html || '<div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">No scripts found. Create one to get started.</div>';
+    // Wrap categories under a top-level 'Scripts' root folder for dropdown behavior
+    const rootExpanded = state.expandedRoot || !!query;
+    const rootArrowClass = rootExpanded ? 'expanded' : '';
+    const rootChildrenHtml = html || '<div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">No scripts found. Create one to get started.</div>';
+
+    tree.innerHTML = `
+        <div class="root-folder">
+            <div class="category-header root-header" role="button" tabindex="0" aria-expanded="${rootExpanded}" onclick="toggleRoot()" onkeydown="handleKeyboardAction(event, () => toggleRoot())">
+                <span class="category-arrow ${rootArrowClass}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </span>
+                <span class="category-icon">${ICONS.network}</span>
+                <span class="category-name">Scripts</span>
+                <span class="category-count">${totalScripts}</span>
+            </div>
+            <div class="root-children" style="display: ${rootExpanded ? '' : 'none'};">
+                ${rootChildrenHtml}
+            </div>
+        </div>
+    `;
     countEl.textContent = totalScripts;
 
     if (favScripts.length > 0) {
         favsSection.style.display = '';
-        favsList.innerHTML = favScripts.map(s => `
+        favsList.innerHTML = favScripts.map(s => {
+            const displayName = ((s.name || '') + '').trim() || s.file || (s.relative_path || '').split('/').pop() || '';
+            return `
             <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}" role="button" tabindex="0"
                 onclick="selectScript('${s.relative_path}')"
                 onkeydown="handleKeyboardAction(event, () => selectScript('${s.relative_path}'))">
                 <span class="script-item-icon" style="color: var(--accent-yellow); stroke: var(--accent-yellow);">${ICONS.favorite}</span>
-                <span class="script-item-name">${escapeHtml(s.name)}</span>
+                <span class="script-item-name">${escapeHtml(displayName)}</span>
             </li>
-        `).join('');
+        `}).join('');
     } else {
         favsSection.style.display = 'none';
     }
@@ -3048,6 +3071,11 @@ function renderResources(resources) {
 function toggleCategory(cat) {
     if (state.expandedCategories.has(cat)) state.expandedCategories.delete(cat);
     else state.expandedCategories.add(cat);
+    renderSidebar();
+}
+
+function toggleRoot() {
+    state.expandedRoot = !state.expandedRoot;
     renderSidebar();
 }
 
