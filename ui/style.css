@@ -1273,6 +1273,15 @@ body {
     padding-right: 4px;
 }
 
+.history-load-more {
+    width: 100%;
+    justify-content: center;
+    padding: 10px 16px;
+    margin-top: 4px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
 .history-entry {
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);

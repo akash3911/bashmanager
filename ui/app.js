@@ -1401,16 +1401,25 @@ function renderHistorySummary(summary = {}) {
     ].join('');
 }
 
-function renderHistoryEntries(entries = []) {
+const HISTORY_PAGE_SIZE = 20;
+let historyCurrentPage = 0;
+let historyFullEntries = [];
+
+function renderHistoryPage() {
     const list = document.getElementById('history-list');
     if (!list) return;
 
+    const entries = historyFullEntries;
     if (!entries.length) {
         list.innerHTML = '<div class="history-empty-state">No execution history matches the current search.</div>';
         return;
     }
 
-    list.innerHTML = entries.map(entry => {
+    const visibleCount = (historyCurrentPage + 1) * HISTORY_PAGE_SIZE;
+    const visibleEntries = entries.slice(0, visibleCount);
+    const hasMore = visibleCount < entries.length;
+
+    list.innerHTML = visibleEntries.map(entry => {
         const statusClass = entry.status === 'failed' ? 'failed' : 'success';
         const kindLabel = entry.kind === 'script' ? 'Script' : 'Command';
         const duration = formatHistoryDuration(entry);
@@ -1448,6 +1457,17 @@ function renderHistoryEntries(entries = []) {
         `;
     }).join('');
 
+    if (hasMore) {
+        const loadMore = document.createElement('button');
+        loadMore.className = 'btn btn-action history-load-more';
+        loadMore.textContent = `Load ${Math.min(HISTORY_PAGE_SIZE, entries.length - visibleCount)} more (${entries.length - visibleCount} remaining)`;
+        loadMore.addEventListener('click', () => {
+            historyCurrentPage++;
+            renderHistoryPage();
+        });
+        list.appendChild(loadMore);
+    }
+
     list.querySelectorAll('.history-log-link').forEach(button => {
         button.addEventListener('click', () => {
             const fileName = button.dataset.logFile;
@@ -1472,11 +1492,13 @@ async function refreshExecutionHistory() {
     state.historyQuery = query;
     state.historyFilter = filter;
 
+    historyCurrentPage = 0;
     const payload = await loadExecutionHistory(query, filter);
     state.historyEntries = payload.entries || [];
+    historyFullEntries = state.historyEntries;
     state.historySummary = payload.summary || state.historySummary;
     renderHistorySummary(state.historySummary);
-    renderHistoryEntries(state.historyEntries);
+    renderHistoryPage();
 }
 
 async function openHistoryViewer() {
@@ -3215,39 +3237,7 @@ function bindEvents() {
             }
         });
     }
-
-    // Real-Time Sidebar Script Filter Logic (Fixed Variant)
-    const scriptSearchBar = document.getElementById('script-search-bar');
-    if (scriptSearchBar) {
-        scriptSearchBar.addEventListener('input', (e) => {
-            const filterText = e.target.value.toLowerCase().trim();
-            const scriptItems = document.querySelectorAll('#category-tree .script-item');
-            
-            scriptItems.forEach(item => {
-                const scriptNameEl = item.querySelector('.script-item-name');
-                if (!scriptNameEl) return;
-                
-                const scriptName = scriptNameEl.textContent.toLowerCase();
-                
-                if (scriptName.includes(filterText)) {
-                    item.style.display = 'flex';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-
-            // Handle category auto-expansion smoothly without resetting terminal CSS
-            const categoryLists = document.querySelectorAll('#category-tree .script-list');
-            categoryLists.forEach(list => {
-                if (filterText !== '') {
-                    list.style.maxHeight = 'none';
-                    list.classList.remove('collapsed');
-                } else {
-                    list.style.maxHeight = '';
-                }
-            });
-        });
-    }
+    
 
     // Terminal Tabs
     const btnAddTab = document.getElementById('btn-add-tab');
