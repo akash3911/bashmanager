@@ -3575,10 +3575,20 @@ def kill_script():
     return jsonify({"success": True, "run_id": run_id})
 
 
+@app.route("/api/exec/check_lock", methods=["GET"])
+def check_terminal_lock():
+    locks = load_locks()
+    is_locked = "__terminal__" in locks
+    return jsonify({"locked": is_locked})
+
 @app.route("/api/exec", methods=["POST"])
 def exec_command():
     data = request.get_json(silent=True) or {}
     command = data.get("command", "")
+    password = data.get("password", "")
+
+    if not check_lock("__terminal__", password):
+        return jsonify({"error": "Terminal is locked", "success": False}), 401
 
     if not command:
         return jsonify({"error": "No command provided"}), 400

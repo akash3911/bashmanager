@@ -13,6 +13,7 @@ const API = {
     delete: '/api/scripts/delete',
     favorite: '/api/scripts/favorite',
     exec: '/api/exec',
+    exec_check_lock: '/api/exec/check_lock',
     lock: '/api/scripts/lock',
     import_github: '/api/scripts/import_github',
     pr: '/api/git/pr',
@@ -30,6 +31,7 @@ const API = {
 let state = {
     scripts: {},
     activeScript: null,
+    lockTarget: null,
     expandedCategories: new Set(),
     expandedRoot: true,
     searchQuery: '',
@@ -1367,8 +1369,29 @@ async function execCommand(cmd) {
         const res = await fetch(API.exec, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmd }),
+            body: JSON.stringify({ 
+                command: cmd,
+                password: getUnlockPassword('__terminal__')
+            }),
         });
+
+        if (res.status === 401) {
+            const pwd = window.prompt('Terminal is locked. Please enter the terminal password:');
+            if (pwd !== null) {
+                markScriptUnlocked('__terminal__', pwd);
+                // Re-run without duplicating history
+                state.cmdHistory.pop();
+                state.cmdHistoryIndex--;
+                const cliBody = getTerminalBody(termId);
+                if (cliBody && cliBody.lastElementChild) {
+                    cliBody.removeChild(cliBody.lastElementChild); // Remove '$ cmd'
+                }
+                execCommand(cmd);
+            } else {
+                appendToCli('Error: Terminal is locked.', 'error', termId);
+            }
+            return;
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -3548,10 +3571,6 @@ function bindEvents() {
         githubOverlay.addEventListener('click', (e) => { if (e.target.id === 'github-modal-overlay') closeGithub(); });
 
         document.getElementById('github-modal-import').addEventListener('click', () => {
-            const url = document.getElementById('github-url').value;
-            const category = document.getElementById('github-category').value;
-            const filename = document.getElementById('github-filename').value;
-
             if (!url || !category || !filename) {
                 return notify('All GitHub import fields are required.', 'warning');
             }
@@ -3588,6 +3607,31 @@ function bindEvents() {
     // Lock Features
     const btnLock = document.getElementById('btn-lock');
     const lockOverlay = document.getElementById('lock-modal-overlay');
+
+    function openLockModal(targetPath, isLocked) {
+        state.lockTarget = targetPath;
+        const modalHeader = document.querySelector('#lock-modal h2');
+        const currentPassGroup = document.getElementById('lock-current-pass-group');
+        const newPassGroup = document.getElementById('lock-new-pass').parentElement;
+
+        if (isLocked) {
+            modalHeader.textContent = targetPath === '__terminal__' ? 'Remove Terminal Lock' : 'Remove Script Lock';
+            currentPassGroup.style.display = 'flex';
+            currentPassGroup.querySelector('label').textContent = 'Enter Password to Remove Lock';
+            newPassGroup.style.display = 'none';
+        } else {
+            modalHeader.textContent = targetPath === '__terminal__' ? 'Lock Terminal' : 'Lock Script';
+            currentPassGroup.style.display = 'none';
+            newPassGroup.style.display = 'flex';
+            newPassGroup.querySelector('label').textContent = 'Set Password';
+        }
+
+        document.getElementById('lock-current-pass').value = '';
+        document.getElementById('lock-new-pass').value = '';
+
+        lockOverlay.classList.add('active');
+    }
+
     if (btnLock && lockOverlay) {
         btnLock.addEventListener('click', () => {
             if (!state.activeScript) return;
@@ -3598,28 +3642,22 @@ function bindEvents() {
                 let sc = state.scripts[cat].find(s => s.relative_path === state.activeScript);
                 if (sc && sc.locked) isLocked = true;
             }
-
-            const modalHeader = document.querySelector('#lock-modal h2');
-            const currentPassGroup = document.getElementById('lock-current-pass-group');
-            const newPassGroup = document.getElementById('lock-new-pass').parentElement;
-
-            if (isLocked) {
-                modalHeader.textContent = 'Remove Script Lock';
-                currentPassGroup.style.display = 'flex';
-                currentPassGroup.querySelector('label').textContent = 'Enter Password to Remove Lock';
-                newPassGroup.style.display = 'none';
-            } else {
-                modalHeader.textContent = 'Lock Script';
-                currentPassGroup.style.display = 'none';
-                newPassGroup.style.display = 'flex';
-                newPassGroup.querySelector('label').textContent = 'Set Password';
-            }
-
-            document.getElementById('lock-current-pass').value = '';
-            document.getElementById('lock-new-pass').value = '';
-
-            lockOverlay.classList.add('active');
+            openLockModal(state.activeScript, isLocked);
         });
+    }
+
+    const btnLockTerminal = document.getElementById('btn-lock-terminal');
+    if (btnLockTerminal && lockOverlay) {
+        btnLockTerminal.addEventListener('click', async () => {
+            try {
+                const res = await fetch(API.exec_check_lock);
+                const data = await res.json();
+                openLockModal('__terminal__', data.locked);
+            } catch (err) {
+                console.error('Failed to check terminal lock status', err);
+            }
+        });
+    }
 
         const closeLock = () => lockOverlay.classList.remove('active');
         document.getElementById('lock-modal-close').addEventListener('click', closeLock);
@@ -3647,10 +3685,22 @@ function bindEvents() {
             ?.addEventListener('click', restartReplay);
 
         document.getElementById('lock-modal-save').addEventListener('click', async () => {
+            if (!state.lockTarget) return;
+
             let isLocked = false;
-            for (let cat in state.scripts) {
-                let sc = state.scripts[cat].find(s => s.relative_path === state.activeScript);
-                if (sc && sc.locked) isLocked = true;
+            if (state.lockTarget === '__terminal__') {
+                try {
+                    const res = await fetch(API.exec_check_lock);
+                    const data = await res.json();
+                    isLocked = data.locked;
+                } catch (e) {
+                    console.error(e);
+                }
+            } else {
+                for (let cat in state.scripts) {
+                    let sc = state.scripts[cat].find(s => s.relative_path === state.lockTarget);
+                    if (sc && sc.locked) isLocked = true;
+                }
             }
 
             let oldPass = '', newPass = '';
@@ -3665,25 +3715,31 @@ function bindEvents() {
                 }
             }
 
-            const success = await manageLock(state.activeScript, oldPass, newPass);
+            const success = await manageLock(state.lockTarget, oldPass, newPass);
             if (success) {
+                const targetName = state.lockTarget === '__terminal__' ? 'Terminal' : 'Script';
                 notify(
                     isLocked
-                        ? 'Script lock removed successfully.'
-                        : 'Script locked successfully.',
+                        ? `${targetName} lock removed successfully.`
+                        : `${targetName} locked successfully.`,
                     'success'
                 );
-                if (!isLocked && newPass) {
-                    clearScriptUnlock(state.activeScript);
-                    selectScript(state.activeScript);
-                } else if (isLocked && !newPass) {
-                    clearScriptUnlock(state.activeScript);
-                    selectScript(state.activeScript);
+                
+                if (state.lockTarget === '__terminal__') {
+                    if (newPass) markScriptUnlocked('__terminal__', newPass);
+                    else clearScriptUnlock('__terminal__');
+                } else {
+                    if (!isLocked && newPass) {
+                        clearScriptUnlock(state.lockTarget);
+                        selectScript(state.lockTarget);
+                    } else if (isLocked && !newPass) {
+                        clearScriptUnlock(state.lockTarget);
+                        selectScript(state.lockTarget);
+                    }
                 }
                 closeLock();
             }
         });
-    }
 
     document.getElementById('btn-reliability')?.addEventListener('click', openReliabilityDashboard);
 
