@@ -12,7 +12,10 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
         rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=5">
     <link rel="stylesheet" href="style.css">
+    <!-- Sanitizer for XSS prevention -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"></script>
 </head>
 
 <body>
@@ -28,6 +31,8 @@
             </div>
             <span class="version-badge">v1.0</span>
         </div>
+        <div id="header-clock" aria-label="System clock" title="Current Local Time">00:00:00</div>
+        </div>
         <div class="header-center">
             <div class="search-container" id="search-container">
                 <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
@@ -35,11 +40,18 @@
                     <circle cx="11" cy="11" r="8" />
                     <path d="m21 21-4.3-4.3" />
                 </svg>
-                <input type="text" id="search-input" aria-label="Search scripts" placeholder="Search scripts... (Ctrl+K)" autocomplete="off">
+                <input type="text" id="search-input" aria-label="Search scripts"
+                    placeholder="Search scripts... (Ctrl+K)" autocomplete="off">
                 <kbd class="search-kbd">Ctrl+K</kbd>
             </div>
         </div>
         <div class="header-right">
+      <div class="header-right">
+            <button class="btn-icon" id="theme-toggle-btn" title="Toggle Light/Dark Mode" aria-label="Toggle UI Theme" style="margin-right: 4px; display: flex; align-items: center; justify-content: center;">
+                <svg id="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+                <svg id="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m18.36 18.36 1.41 1.41"/><path d="M20 12h2"/><path d="M2 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+            </button>
+
             <button class="btn-icon" id="btn-history" title="Execution History" aria-label="Open execution history">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -47,18 +59,6 @@
                     <path d="M12 7v5l3 3" />
                     <path d="M12 3v2" />
                 </svg>
-            </button>
-            <button
-                id="btn-analytics"
-                class="btn"
-                aria-label="Open execution analytics dashboard">
-                Analytics
-            </button>
-            <button
-                id="btn-workspaces"
-                class="btn"
-                aria-label="Manage workspace profiles">
-                Workspaces
             </button>
             <button class="btn-icon" id="btn-debugger-toggle" title="Toggle Debugger Console (Ctrl+`)" aria-label="Toggle debugger console">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
@@ -76,6 +76,21 @@
                     <path d="M17.2 17c2.1.1 3.8 1.9 3.8 4" />
                 </svg>
             </button>
+            <button id="btn-analytics" class="btn" aria-label="Open execution analytics dashboard">
+                Analytics
+            </button>
+            <button id="btn-workspaces" class="btn" aria-label="Manage workspace profiles">
+                Workspaces
+            </button>
+            <button id="btn-header-tools" class="btn" aria-label="Open predefined developer and DevOps tools">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;">
+                    <rect width="8" height="8" x="3" y="3" rx="1" />
+                    <rect width="8" height="8" x="13" y="3" rx="1" />
+                    <rect width="8" height="8" x="3" y="13" rx="1" />
+                    <rect width="8" height="8" x="13" y="13" rx="1" />
+                </svg>
+                Dev &amp; DevOps Tools
+            </button>
             <button class="btn-icon" id="btn-refresh" title="Refresh Scripts" aria-label="Refresh scripts">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -83,6 +98,59 @@
                     <path d="M3 3v5h5" />
                 </svg>
             </button>
+
+            <!-- Header Predefined Dev/DevOps Tools Dropdown -->
+            <div class="header-tools-dropdown" id="header-tools-dropdown">
+                <div class="dropdown-header">Dev Tools</div>
+                <div class="dropdown-item" data-tool="sys_info">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+                    System Info Dashboard
+                </div>
+                <div class="dropdown-item" data-tool="port_scanner">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    Process Port Lister
+                </div>
+                <div class="dropdown-item" data-tool="find_large_files">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    Find Large Files (&gt;100MB)
+                </div>
+                <div class="dropdown-item" data-tool="json_formatter">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    JSON Formatter/Validator
+                </div>
+                <div class="dropdown-item" data-tool="base64_util">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>
+                    Base64 Encode/Decode
+                </div>
+                
+                <div class="dropdown-divider"></div>
+                
+                <div class="dropdown-header">DevOps Tools</div>
+                <div class="dropdown-item" data-tool="docker_status">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+                    Docker Container Status
+                </div>
+                <div class="dropdown-item" data-tool="ssl_expiry">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    SSL Expiry &amp; Issuer
+                </div>
+                <div class="dropdown-item" data-tool="git_diagnostics">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>
+                    Git Repo Diagnostics
+                </div>
+                <div class="dropdown-item" data-tool="resource_alarm">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
+                    Resource Alarm Monitor
+                </div>
+                <div class="dropdown-item" data-tool="k8s_pods">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                    Kubernetes Pod Status
+                </div>
+                <div class="dropdown-item" data-tool="nginx_tester">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    Nginx Config Integrity
+                </div>
+            </div>
         </div>
     </header>
 
@@ -100,7 +168,8 @@
                                 d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
                         </svg>
                         <h2>Scripts</h2>
-                        <button class="btn-icon btn-add-script-small" id="btn-add-script" title="Add New Script"aria-label="Add new script" style="width: 20px; height: 20px; margin-left: auto;">
+                        <button class="btn-icon btn-add-script-small" id="btn-add-script" title="Add New Script"
+                            aria-label="Add new script" style="width: 20px; height: 20px; margin-left: auto;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -108,7 +177,8 @@
                                 <path d="M12 5v14" />
                             </svg>
                         </button>
-                        <button class="btn-icon btn-add-script-small" id="btn-github-import" title="Import from GitHub" aria-label="Import script from GitHub" style="width: 20px; height: 20px; margin-left: 6px;">
+                        <button class="btn-icon btn-add-script-small" id="btn-github-import" title="Import from GitHub"
+                            aria-label="Import script from GitHub" style="width: 20px; height: 20px; margin-left: 6px;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -117,8 +187,76 @@
                                 <path d="M9 18c-4.51 2-5-2-7-2" />
                             </svg>
                         </button>
+                        <button class="btn-icon btn-add-script-small" id="btn-tools-dropdown" title="Predefined Dev/DevOps Tools"
+                            aria-label="Predefined Dev and DevOps Tools" style="width: 20px; height: 20px; margin-left: 6px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <rect width="8" height="8" x="3" y="3" rx="1" />
+                                <rect width="8" height="8" x="13" y="3" rx="1" />
+                                <rect width="8" height="8" x="3" y="13" rx="1" />
+                                <rect width="8" height="8" x="13" y="13" rx="1" />
+                            </svg>
+                        </button>
                     </div>
                     <span class="script-count" id="script-count">0</span>
+                    
+                    <!-- Predefined Dev/DevOps Tools Dropdown -->
+                    <div class="tools-dropdown-menu" id="tools-dropdown-menu">
+                        <div class="dropdown-header">Dev Tools</div>
+                        <div class="dropdown-item" data-tool="sys_info">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+                            System Info Dashboard
+                        </div>
+                        <div class="dropdown-item" data-tool="port_scanner">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                            Process Port Lister
+                        </div>
+                        <div class="dropdown-item" data-tool="find_large_files">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                            Find Large Files (&gt;100MB)
+                        </div>
+                        <div class="dropdown-item" data-tool="json_formatter">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                            JSON Formatter/Validator
+                        </div>
+                        <div class="dropdown-item" data-tool="base64_util">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>
+                            Base64 Encode/Decode
+                        </div>
+                        
+                        <div class="dropdown-divider"></div>
+                        
+                        <div class="dropdown-header">DevOps Tools</div>
+                        <div class="dropdown-item" data-tool="docker_status">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+                            Docker Container Status
+                        </div>
+                        <div class="dropdown-item" data-tool="ssl_expiry">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            SSL Expiry &amp; Issuer
+                        </div>
+                        <div class="dropdown-item" data-tool="git_diagnostics">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>
+                            Git Repo Diagnostics
+                        </div>
+                        <div class="dropdown-item" data-tool="resource_alarm">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
+                            Resource Alarm Monitor
+                        </div>
+                        <div class="dropdown-item" data-tool="k8s_pods">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                            Kubernetes Pod Status
+                        </div>
+                        <div class="dropdown-item" data-tool="nginx_tester">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                            Nginx Config Integrity
+                        </div>
+                    </div>
+                </div>
+                <div class="sidebar-search-wrapper" style="padding: 10px 14px; border-bottom: 1px solid var(--border-color, #2d3139);">
+                    <input type="text" id="script-search-bar" placeholder="Filter scripts by name..." autocomplete="off" spellcheck="false" 
+                           style="width: 100%; padding: 6px 10px; background: #1e222b; border: 1px solid #2d3139; color: #fff; border-radius: 4px; font-size: 13px;">
                 </div>
 
                 <!-- Favorites Section -->
@@ -152,7 +290,8 @@
                                 <span class="dot dot-green"></span>
                             </span>
                             <span>Terminal 1</span>
-                            <button class="cli-tab-close" title="Close" aria-label="Close terminal" onclick="event.stopPropagation(); closeTerminal(1)">
+                            <button class="cli-tab-close" title="Close" aria-label="Close terminal"
+                                onclick="event.stopPropagation(); closeTerminal(1)">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -161,7 +300,8 @@
                                 </svg>
                             </button>
                         </div>
-                        <button class="btn-icon btn-add-tab" id="btn-add-tab" title="New Terminal" aria-label="Open new terminal">
+                        <button class="btn-icon btn-add-tab" id="btn-add-tab" title="New Terminal"
+                            aria-label="Open new terminal">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -171,6 +311,34 @@
                         </button>
                     </div>
                     <div class="cli-header-right">
+                        <button class="btn-icon" id="btn-copy-output" title="Copy terminal output"
+                            aria-label="Copy terminal output to clipboard">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                                <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                            </svg>
+                        </button>
+                        <button class="btn-icon" id="btn-download-log" title="Download terminal log"
+                            aria-label="Download terminal output as text file">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" x2="12" y1="15" y2="3" />
+                            </svg>
+                        </button>
+                        <button class="btn-icon" id="btn-autoscroll" title="Auto-scroll: On"
+                            aria-label="Toggle auto-scroll" aria-pressed="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path d="M12 5v14" />
+                                <path d="m19 12-7 7-7-7" />
+                            </svg>
+                        </button>
                         <div class="terminal-search-wrapper">
                             <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14"
                                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -178,11 +346,22 @@
                                 <circle cx="11" cy="11" r="8"></circle>
                                 <path d="m21 21-4.3-4.3"></path>
                             </svg>
-                            <input type="text" id="cli-search-input" aria-label="Search terminal output" placeholder="Find... (Ctrl+F)" autocomplete="off">
+                            <input type="text" id="cli-search-input" aria-label="Search terminal output"
+                                placeholder="Find... (Ctrl+F)" autocomplete="off">
                             <span id="cli-search-results"></span>
                         </div>
                         <span class="run-status" id="run-status"></span>
-                        <button class="btn-icon btn-clear" id="btn-clear" title="Clear Terminal" aria-label="Clear terminal">
+                        <button class="btn-icon" id="btn-lock-terminal" title="Lock Terminal"
+                            aria-label="Lock terminal">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                            </svg>
+                        </button>
+                        <button class="btn-icon btn-clear" id="btn-clear" title="Clear Terminal"
+                            aria-label="Clear terminal">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -192,15 +371,40 @@
                         </button>
                     </div>
                 </div>
+                <!-- Progress Tracker Panel -->
+                <div id="progress-tracker-panel" class="progress-tracker-panel" style="display: none;">
+                    <div class="progress-tracker-header">
+                        <span class="progress-tracker-title">Execution Progress</span>
+                        <span id="progress-tracker-step" class="progress-tracker-step">Step 0/0</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+                    </div>
+                    <div class="progress-tracker-footer">
+                        <span id="progress-tracker-command" class="progress-tracker-command">Waiting...</span>
+                        <span id="progress-tracker-status" class="progress-tracker-status">Status: Idle</span>
+                    </div>
+                </div>
                 <div class="cli-body" id="terminal-body" role="log" aria-live="polite">
                     <div class="cli-welcome">
                         <span class="cli-prompt">$</span> <span class="cli-welcome-text">Welcome to DevShell. Select a
                             script to run, or type a command below.</span>
                     </div>
+
+                    <div class="terminal-scroll-shortcuts" id="terminal-scroll-actions">
+                        <button class="scroll-action-btn" id="scroll-to-top-btn" title="Scroll to Top" aria-label="Scroll to top of terminal">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                        </button>
+                        <button class="scroll-action-btn" id="scroll-to-bottom-btn" title="Scroll to Bottom" aria-label="Scroll to bottom of terminal">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                    </div>
                 </div>
+
                 <div class="cli-input-bar">
                     <span class="cli-prompt-input">$</span>
-                    <input type="text" id="cli-input" aria-label="Terminal command input" placeholder="Type a command and press Enter..." autocomplete="off" spellcheck="false">
+                    <input type="text" id="cli-input" aria-label="Terminal command input"
+                        placeholder="Type a command and press Enter..." autocomplete="off" spellcheck="false">
                     <button class="btn btn-run-cmd" id="btn-run-cmd" title="Execute" aria-label="Execute command">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -268,7 +472,8 @@
                             </svg>
                             <span>Overview</span>
                         </div>
-                        <button class="btn-icon btn-close-detail" id="btn-close-detail" title="Back to summary" aria-label="Back to summary">
+                        <button class="btn-icon btn-close-detail" id="btn-close-detail" title="Back to summary"
+                            aria-label="Back to summary">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                 stroke-linejoin="round">
@@ -283,7 +488,8 @@
                         <p id="detail-desc" class="script-description"></p>
                         <div class="tag-list" id="detail-tags"></div>
                         <div class="script-actions">
-                            <button class="btn btn-action" id="btn-lock" title="Change Lock Settings" aria-label="Change lock settings">
+                            <button class="btn btn-action" id="btn-lock" title="Change Lock Settings"
+                                aria-label="Change lock settings">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -291,13 +497,18 @@
                                     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                                 </svg>
                             </button>
-                            <button class="btn btn-action" id="btn-fav" title="Toggle Favorite" aria-label="Toggle favorite">
+                            <button class="btn btn-action" id="btn-fav" title="Toggle Favorite"
+                                aria-label="Toggle favorite">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
                                     <polygon
                                         points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                                 </svg>
+                            </button>
+                            <button class="btn btn-action" id="btn-url" title="Open Official Website/Docs" style="display: none; background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); border-color: rgba(59, 130, 246, 0.2);">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+                                <span>Docs</span>
                             </button>
                             <button class="btn btn-action" id="btn-edit" title="Edit Script" aria-label="Edit script">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
@@ -309,8 +520,7 @@
                                 <span>Edit</span>
                             </button>
                             <!-- NEW FEATURE: The Push/PR button uses an inline onclick handler to bypass event-binding lifecycle issues -->
-                            <button class="btn btn-action" id="btn-pr" title="Push to Git / Raise PR"
-                                onclick="if(typeof state !== 'undefined' && state.activeScript) raisePRFlow(state.activeScript);">
+                            <button class="btn btn-action" id="btn-pr" title="Push to Git / Raise PR">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -319,7 +529,8 @@
                                 </svg>
                                 <span>Push / PR</span>
                             </button>
-                            <button class="btn btn-action btn-danger" id="btn-delete" title="Delete Script" aria-label="Delete script">
+                            <button class="btn btn-action btn-danger" id="btn-delete" title="Delete Script"
+                                aria-label="Delete script">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -611,19 +822,65 @@ echo 'Hello World'"></textarea>
             </div>
         </div>
     </div>
-
-    <!-- Execution History Modal -->
+    
     <div class="modal-overlay" id="history-modal-overlay">
+    <!-- Runtime Arguments Modal -->
+    <div class="modal-overlay" id="arguments-modal-overlay">
+        <div class="modal" id="arguments-modal" role="dialog" aria-modal="true" style="width: 500px; max-width: 90vw;">
+            <div class="modal-header">
+                <div>
+                    <h2>Script Arguments</h2>
+                    <p class="modal-subtitle" style="margin: 6px 0 0 0; color: var(--text-muted); font-size: 12px;">
+                        Provide optional arguments for script execution (one argument per line, or space-separated)
+                    </p>
+                </div>
+                <button class="btn-icon" id="arguments-modal-close" aria-label="Close arguments modal">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="arguments-input">Arguments</label>
+                    <textarea id="arguments-input" placeholder="--dry-run&#10;--verbose&#10;-f /path/to/file" 
+                        style="min-height: 120px; font-family: var(--font-mono); font-size: 12px;"></textarea>
+                    <p style="margin-top: 8px; color: var(--text-muted); font-size: 11px;">
+                        Each line becomes one argument. Leave empty to run without arguments.
+                    </p>
+                </div>
+                <div id="arguments-preview" style="display: none; margin-top: 12px; padding: 10px; background: var(--bg-tertiary); border-radius: 4px; border: 1px solid var(--border);">
+                    <p style="color: var(--text-muted); font-size: 11px; margin: 0 0 8px 0;">Preview:</p>
+                    <div id="arguments-preview-list" style="font-family: var(--font-mono); font-size: 11px; color: var(--text-primary);"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" id="arguments-modal-cancel">Cancel</button>
+                <button class="btn btn-save" id="arguments-modal-run" style="background: var(--accent); color: #fff; border-color: var(--accent);">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Run Script
+                </button>
+            </div>
+        </div>
+    </div>
+
+
         <div class="modal history-modal" id="history-modal" role="dialog" aria-modal="true">
             <div class="modal-header">
                 <div>
                     <h2>Execution History</h2>
-                    <p class="history-modal-subtitle">Search command and script runs, inspect failures, and export logs.</p>
+                    <p class="history-modal-subtitle">Search command and script runs, inspect failures, and export logs.
+                    </p>
+                </div>
+                <div class="history-search-filter-wrapper" style="flex: 1; max-width: 320px; margin: 0 24px;">
+                    <input type="text" id="history-modal-search" placeholder="Filter past execution commands live..." aria-label="Search past execution commands" autocomplete="off" spellcheck="false" style="width: 100%; padding: 8px 12px; border-radius: 6px; background: var(--bg-primary, #0d1117); border: 1px solid var(--border-color, #30363d); color: var(--text-primary, #c9d1d9); font-family: var(--font-mono, monospace); font-size: 12px;">
                 </div>
                 <div class="history-header-actions">
+                    <button class="btn btn-action btn-danger" id="history-clear-btn" style="margin-right: 8px; background-color: #dc3545; color: white;">Clear History</button>
                     <button class="btn btn-action" id="history-export-txt">Export .txt</button>
                     <button class="btn btn-action" id="history-export-log">Export .log</button>
-                    <button class="btn btn-action btn-danger" id="btn-clear-history">Clear History</button>
                     <button class="btn-icon" id="history-modal-close" aria-label="Close history viewer">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -637,7 +894,8 @@ echo 'Hello World'"></textarea>
                 <div class="history-toolbar">
                     <div class="form-group history-search-group">
                         <label for="history-search">Search history</label>
-                        <input type="text" id="history-search" placeholder="Search commands, scripts, outputs, errors..." autocomplete="off">
+                        <input type="text" id="history-search"
+                            placeholder="Search commands, scripts, outputs, errors..." autocomplete="off">
                     </div>
                     <div class="history-filter-group" role="tablist" aria-label="History filters">
                         <button class="history-filter active" data-history-filter="all">All</button>
@@ -721,11 +979,16 @@ echo 'Hello World'"></textarea>
         <div class="debugger-input-area">
             <span class="debugger-input-prompt">›</span>
             <div class="debugger-input-wrapper">
+                <input type="text" id="debugger-input"
+                    placeholder="Evaluate JS expression... (script output auto-mirrors here · Tab for suggestions)"
+                    <input type="text" id="debugger-input" aria-label="Debugger console input"
+                    placeholder="Evaluate JS expression... (script output auto-mirrors here · Tab for suggestions)"
                 <input type="text" id="debugger-input" aria-label="Debugger console input" placeholder="Evaluate JS expression... (script output auto-mirrors here · Tab for suggestions)"
                     autocomplete="off" spellcheck="false">
                 <div class="debugger-suggestions" id="debugger-suggestions"></div>
             </div>
-            <button class="btn btn-run-cmd" id="debugger-eval-btn" title="Evaluate" aria-label="Evaluate JavaScript expression">
+            <button class="btn btn-run-cmd" id="debugger-eval-btn" title="Evaluate"
+                aria-label="Evaluate JavaScript expression">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="9 10 4 15 9 20" />
@@ -735,7 +998,7 @@ echo 'Hello World'"></textarea>
         </div>
     </div>
 
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
 
     <div id="notification-container" aria-live="polite" aria-atomic="true"></div>
 
@@ -763,7 +1026,87 @@ echo 'Hello World'"></textarea>
                 </div>
             </div>
                 <div id="replay-metadata"></div>
+                <div id="replay-diagnostics" class="replay-diagnostics" hidden role="status" aria-live="polite"></div>
                 <div id="replay-terminal" class="terminal-output"></div>
+        </div>
+    </div>
+
+    <!-- Reliability Dashboard Modal -->
+    <div id="reliability-modal-overlay" class="modal-overlay">
+        <div id="reliability-modal" class="modal reliability-modal" role="dialog" aria-modal="true"
+            aria-labelledby="reliability-modal-title">
+            <div class="modal-header">
+                <div>
+                    <h2 id="reliability-modal-title">Reliability Dashboard</h2>
+                    <p class="reliability-modal-subtitle">
+                        Execution health, failure patterns, trends, and recommendations.
+                        <span id="reliability-updated-at" class="reliability-updated-at">Last updated: —</span>
+                    </p>
+                </div>
+                <div class="reliability-header-actions">
+                    <button class="btn btn-action" id="reliability-refresh-btn" type="button">Refresh</button>
+                    <button class="btn-icon" id="reliability-modal-close" aria-label="Close reliability dashboard">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 6 6 18" />
+                            <path d="m6 6 12 12" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body reliability-modal-body">
+                <div class="reliability-toolbar">
+                    <div class="form-group reliability-search-group">
+                        <label for="reliability-search">Search scripts</label>
+                        <input type="text" id="reliability-search" placeholder="Filter by script name..."
+                            autocomplete="off" spellcheck="false">
+                    </div>
+                    <div class="reliability-filter-group" role="tablist" aria-label="Reliability filters">
+                        <button class="reliability-filter active" data-reliability-filter="all" type="button" role="tab" aria-selected="true">All</button>
+                        <button class="reliability-filter" data-reliability-filter="failing" type="button" role="tab" aria-selected="false">At risk</button>
+                        <button class="reliability-filter" data-reliability-filter="flaky" type="button" role="tab" aria-selected="false">Flaky</button>
+                        <button class="reliability-filter" data-reliability-filter="slow" type="button" role="tab" aria-selected="false">Slow</button>
+                        <button class="reliability-filter" data-reliability-filter="degrading" type="button" role="tab" aria-selected="false">Degrading</button>
+                        <button class="reliability-filter" data-reliability-filter="improving" type="button" role="tab" aria-selected="false">Improving</button>
+                    </div>
+                </div>
+                <div id="reliability-status-banner" class="reliability-status-banner" hidden
+                    aria-live="polite" aria-atomic="true"></div>
+                <div id="reliability-scorecards" class="reliability-scorecards" aria-label="Reliability overview metrics"></div>
+                <section class="reliability-panel reliability-panel-wide reliability-panel--orchestration"
+                    aria-labelledby="reliability-orchestration-heading">
+                    <h3 id="reliability-orchestration-heading">Replay &amp; workspace diagnostics</h3>
+                    <div id="reliability-orchestration" class="reliability-panel-content" role="list"></div>
+                </section>
+                <div class="reliability-panels">
+                    <section class="reliability-panel reliability-panel--failures" aria-labelledby="reliability-failures-heading">
+                        <h3 id="reliability-failures-heading">Failure categories</h3>
+                        <div id="reliability-failure-categories" class="reliability-panel-content" role="list"></div>
+                    </section>
+                    <section class="reliability-panel reliability-panel--flaky" aria-labelledby="reliability-flaky-heading">
+                        <h3 id="reliability-flaky-heading">Flaky scripts</h3>
+                        <div id="reliability-flaky-scripts" class="reliability-panel-content" role="list"></div>
+                    </section>
+                    <section class="reliability-panel reliability-panel--slow" aria-labelledby="reliability-slow-heading">
+                        <h3 id="reliability-slow-heading">Slow scripts</h3>
+                        <div id="reliability-slow-scripts" class="reliability-panel-content" role="list"></div>
+                    </section>
+                    <section class="reliability-panel reliability-panel--trends" aria-labelledby="reliability-trends-heading">
+                        <h3 id="reliability-trends-heading">Trend summaries</h3>
+                        <div id="reliability-trend-summaries" class="reliability-panel-content" role="list"></div>
+                    </section>
+                    <section class="reliability-panel reliability-panel-wide reliability-panel--recommendations"
+                        aria-labelledby="reliability-recommendations-heading">
+                        <h3 id="reliability-recommendations-heading">Recommendations</h3>
+                        <div id="reliability-recommendations" class="reliability-panel-content" role="list"></div>
+                    </section>
+                    <section class="reliability-panel reliability-panel-wide reliability-panel--scripts"
+                        aria-labelledby="reliability-scripts-heading">
+                        <h3 id="reliability-scripts-heading">Scripts</h3>
+                        <div id="reliability-script-list" class="reliability-panel-content" role="list"></div>
+                    </section>
+                </div>
+            </div>
         </div>
     </div>
 
