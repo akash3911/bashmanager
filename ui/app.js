@@ -25,6 +25,8 @@ const API = {
     reliability_trends: '/api/reliability/trends',
     reliability_recommendations: '/api/reliability/recommendations',
     reliability_diagnostics: '/api/reliability/diagnostics',
+    workspace_export: '/api/workspace/export',
+    workspace_import: '/api/workspace/import',
 };
 
 // ─── State ────────────────────────────────────────────────
@@ -3884,6 +3886,23 @@ function bindEvents() {
     document
         .getElementById('workspace-save-profile')
         ?.addEventListener('click', saveWorkspaceProfile);
+
+    document
+        .getElementById('workspace-export-btn')
+        ?.addEventListener('click', exportWorkspaceSnapshot);
+
+    document
+        .getElementById('workspace-import-btn')
+        ?.addEventListener('click', () => {
+            document.getElementById('workspace-import-file')?.click();
+        });
+
+    document
+        .getElementById('workspace-import-file')
+        ?.addEventListener('change', (event) => {
+            importWorkspaceSnapshot(event.target.files?.[0]);
+            event.target.value = '';
+        });
 }
 
 // ─── Helpers ───────────────────────────────────────────────
@@ -4083,18 +4102,7 @@ async function checkWorkspaceRecovery() {
         }
 
         const snapshot = data.workspace.workspace;
-
-        const savedAt = data.workspace.saved_at;
-        const modalBody = document.querySelector('#workspace-restore-overlay .modal-body');
-        if (modalBody && savedAt) {
-            const existing = modalBody.querySelector('.workspace-snapshot-meta');
-            if (!existing) {
-                const meta = document.createElement('div');
-                meta.className = 'workspace-snapshot-meta';
-                meta.textContent = `Snapshot saved at: ${savedAt}`;
-                modalBody.appendChild(meta);
-            }
-        }
+        renderWorkspaceRestorePreview(data.workspace, workspaceDiag);
 
         document
             .getElementById('workspace-restore-overlay')
@@ -4104,21 +4112,53 @@ async function checkWorkspaceRecovery() {
             .getElementById('workspace-restore-btn')
             ?.addEventListener('click', () => {
                 restoreWorkspace(snapshot, 'full');
-            });
+            }, { once: true });
 
         document
             .getElementById('workspace-safe-btn')
             ?.addEventListener('click', () => {
                 restoreWorkspace(snapshot, 'safe');
-            });
+            }, { once: true });
 
         document
             .getElementById('workspace-clean-btn')
-            ?.addEventListener('click', closeWorkspaceRestore);
+            ?.addEventListener('click', closeWorkspaceRestore, { once: true });
 
     } catch (err) {
         console.error(err);
     }
+}
+
+function renderWorkspaceRestorePreview(workspacePayload, diagnostics = {}) {
+    const panel = document.getElementById('workspace-restore-preview');
+    if (!panel) return;
+
+    const snapshot = workspacePayload?.workspace || {};
+    const preview = diagnostics.preview || {};
+    const warnings = diagnostics.warnings || [];
+    const terminalCount = preview.terminal_count ?? (Array.isArray(snapshot.terminals) ? snapshot.terminals.length : 0);
+    const rows = [
+        ['Workspace', preview.workspace_name || 'Recovered workspace'],
+        ['Terminals', terminalCount],
+        ['Snapshot', preview.snapshot_timestamp || workspacePayload?.saved_at || 'Unknown'],
+        ['Replay', preview.has_replay ? 'Present' : 'None'],
+        ['Debugger', preview.has_debug ? 'Present' : 'None'],
+    ];
+
+    panel.hidden = false;
+    panel.innerHTML = safeHTML(`
+        <div class="workspace-integrity-grid">
+            ${rows.map(([label, value]) => `
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(String(value))}</strong>
+            `).join('')}
+        </div>
+        ${warnings.length ? `
+            <div class="workspace-integrity-warnings">
+                ${warnings.map(warning => `<div>${escapeHtml(warning)}</div>`).join('')}
+            </div>
+        ` : '<div class="workspace-integrity-ok">No integrity warnings.</div>'}
+    `);
 }
 
 function closeWorkspaceRestore() {
@@ -4329,6 +4369,56 @@ async function saveWorkspaceProfile() {
     } catch (err) {
         console.error(err);
         notify('Failed to save workspace profile.', 'error');
+    }
+}
+
+async function exportWorkspaceSnapshot() {
+    try {
+        const res = await fetch(API.workspace_export);
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            notify(data.error || 'No workspace snapshot available to export.', 'warning');
+            return;
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'devshell-workspace.json';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    } catch (err) {
+        console.error(err);
+        notify('Failed to export workspace snapshot.', 'error');
+    }
+}
+
+async function importWorkspaceSnapshot(file) {
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        const res = await fetch(API.workspace_import, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (!data.success) {
+            notify(data.error || 'Invalid workspace snapshot.', 'error');
+            return;
+        }
+
+        const warning = data.diagnostics?.warnings?.[0];
+        notify(warning || 'Workspace snapshot imported.', warning ? 'warning' : 'success');
+    } catch (err) {
+        console.error(err);
+        notify('Import must be a valid workspace JSON file.', 'error');
     }
 }
 
@@ -5250,4 +5340,5 @@ async function loadPredefinedScript(key) {
         console.error('Failed to link predefined script:', err);
         notify(`Failed to link script: ${err.message}`, 'error');
     }
+}
 }
