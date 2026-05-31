@@ -1176,7 +1176,16 @@ async function executeScriptWithArguments(relPath, argumentsText) {
             cleanupRunningScript(termId);
             return;
         }
-
+        if (res.status === 404) {
+            appendToCli('Error: Script file not found. It may have been deleted or moved.', 'error', termId);
+            if (typeof DebuggerConsole !== 'undefined') DebuggerConsole.addEntry('error', 'Script file not found — it may have been deleted or moved', 'script');
+            if (termId === state.activeTerminalId) {
+                runStatus.textContent = 'Not Found';
+                runStatus.className = 'run-status error';
+            }
+            cleanupRunningScript(termId);
+            return;
+        }
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             throw new Error(data.error || `Script run failed with HTTP ${res.status}`);
