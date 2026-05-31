@@ -19,6 +19,7 @@ const API = {
     history: '/api/history',
     history_export: '/api/history/export',
     kill: '/api/scripts/kill',
+    command_history_clear: '/api/command_history/clear',
 };
 
 // ─── State ────────────────────────────────────────────────
@@ -655,6 +656,47 @@ async function exportExecutionHistory(format = 'log') {
     anchor.remove();
     URL.revokeObjectURL(url);
 }
+
+async function clearExecutionHistory() {
+    if (!confirm('Are you sure you want to clear all command and execution history? This will delete all script and command run logs, and reset CLI command history. This action cannot be undone.')) {
+        return;
+    }
+    try {
+        const res = await fetch(API.command_history_clear, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        const data = await res.json();
+        if (data.success) {
+            // Reset state
+            state.cmdHistory = [];
+            state.cmdHistoryIndex = -1;
+            state.historyEntries = [];
+            state.historySummary = {
+                total: 0,
+                failed: 0,
+                successful: 0,
+                scripts: 0,
+                commands: 0
+            };
+            
+            // Re-render
+            renderHistorySummary(state.historySummary);
+            renderHistoryEntries(state.historyEntries);
+            
+            // Notify user
+            notify('History cleared successfully.', 'success');
+        } else {
+            notify(data.message || 'Failed to clear history.', 'error');
+        }
+    } catch (err) {
+        console.error('Error clearing history:', err);
+        notify('Failed to clear history. Server might be offline.', 'error');
+    }
+}
+
 
 async function saveScript(category, filename, content) {
     const btn = document.getElementById('modal-save');
@@ -1891,9 +1933,9 @@ function bindEvents() {
     const historyOverlay = document.getElementById('history-modal-overlay');
     const historyClose = document.getElementById('history-modal-close');
     const historySearch = document.getElementById('history-search');
-    const historyFilters = document.querySelectorAll('.history-filter');
     const historyExportTxt = document.getElementById('history-export-txt');
     const historyExportLog = document.getElementById('history-export-log');
+    const btnClearHistory = document.getElementById('btn-clear-history');
 
     if (historyClose) historyClose.addEventListener('click', closeHistoryViewer);
     if (historyOverlay) {
@@ -1917,6 +1959,8 @@ function bindEvents() {
     });
     if (historyExportTxt) historyExportTxt.addEventListener('click', () => exportExecutionHistory('txt'));
     if (historyExportLog) historyExportLog.addEventListener('click', () => exportExecutionHistory('log'));
+    if (btnClearHistory) btnClearHistory.addEventListener('click', clearExecutionHistory);
+
 
     // Main Modal controls
     document.getElementById('modal-close').addEventListener('click', closeModal);

@@ -603,6 +603,54 @@ def get_command_history():
     })
 
 
+@app.route('/api/command_history/clear', methods=['POST'])
+def clear_command_history():
+    try:
+        # Overwrite COMMAND_HISTORY_FILE
+        with open(COMMAND_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump([], f)
+        
+        # Empty history files
+        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+            pass
+        with open(FAILED_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            pass
+
+        # Clear execution logs
+        if os.path.exists(EXECUTION_LOG_DIR):
+            for filename in os.listdir(EXECUTION_LOG_DIR):
+                file_path = os.path.join(EXECUTION_LOG_DIR, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception:
+                    pass
+
+        # Clear session logs
+        if os.path.exists(SESSION_LOG_DIR):
+            for filename in os.listdir(SESSION_LOG_DIR):
+                file_path = os.path.join(SESSION_LOG_DIR, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception:
+                    pass
+
+        return jsonify({
+            'success': True,
+            'message': 'Command and execution history cleared successfully'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Failed to clear history: {str(e)}'
+        }), 500
+
+
 @app.route('/api/history/analytics')
 def history_analytics():
     entries = _load_history_entries(limit=1000)
