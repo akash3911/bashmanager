@@ -3351,6 +3351,7 @@ def run_script():
         execution = None
         stop_event = threading.Event()
         t_reader = None
+        temp_path_created = None
         try:
             # 1. Initialize execution record with arguments
             execution = _start_execution_record(
@@ -3374,6 +3375,8 @@ def run_script():
                     temp_fd, temp_path = tempfile.mkstemp(
                         suffix=".sh", prefix=".tmp_run_", dir=temp_dir
                     )
+                    # Track created temp path so we can always clean it up
+                    temp_path_created = temp_path
                     with os.fdopen(
                         temp_fd, "w", encoding="utf-8", newline="\n"
                     ) as temp_f:
@@ -3623,7 +3626,7 @@ def run_script():
                 proc,
                 execution,
                 run_id=run_id,
-                temp_path=run_path if run_path != full_path else None,
+                temp_path=(temp_path_created if temp_path_created is not None else (run_path if run_path != full_path else None)),
                 was_aborted=True,
                 error_message="Client disconnected",
                 stop_event=stop_event,
@@ -3636,7 +3639,7 @@ def run_script():
                 proc,
                 execution,
                 run_id=run_id,
-                temp_path=run_path if run_path != full_path else None,
+                temp_path=(temp_path_created if temp_path_created is not None else (run_path if run_path != full_path else None)),
                 was_aborted=False,
                 error_message="Execution timed out",
                 stop_event=stop_event,
@@ -3654,7 +3657,7 @@ def run_script():
                 proc,
                 execution,
                 run_id=run_id,
-                temp_path=run_path if run_path != full_path else None,
+                temp_path=(temp_path_created if temp_path_created is not None else (run_path if run_path != full_path else None)),
                 was_aborted=False,
                 error_message=str(e),
                 stop_event=stop_event,
@@ -3668,7 +3671,7 @@ def run_script():
                 proc,
                 execution,
                 run_id=run_id,
-                temp_path=run_path if run_path != full_path else None,
+                temp_path=(temp_path_created if temp_path_created is not None else (run_path if run_path != full_path else None)),
                 stop_event=stop_event,
                 reader_thread=t_reader,
             )
