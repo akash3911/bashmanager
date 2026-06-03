@@ -20,6 +20,7 @@ import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory, Response
+from werkzeug.exceptions import BadRequest
 
 # Setup logger for DevShell backend logging
 logging.basicConfig(level=logging.INFO)
@@ -2479,6 +2480,17 @@ def enforce_security():
             user_agent = request.headers.get('User-Agent', '')
             if any(b in user_agent for b in ['Mozilla', 'Chrome', 'Safari', 'Edge']):
                 abort(403)
+
+    # 3. JSON body validation. Many API handlers safely default missing JSON to
+    # an empty payload, but malformed JSON should fail before route logic runs.
+    if request.method in ['POST', 'PUT', 'DELETE', 'PATCH'] and request.is_json:
+        try:
+            request.get_json(silent=False)
+        except BadRequest:
+            return jsonify({
+                "success": False,
+                "error": "Invalid JSON payload",
+            }), 400
 
 # ─── Routes ───────────────────────────────────────────────────────
 
