@@ -1906,7 +1906,7 @@ async function executePR(relPath, branch, message, repoUrl) {
                     `Successfully pushed to branch '${data.branch}'.\n\nWould you like to open the Pull Request page on GitHub?`
                 )
             ) {
-                window.open(data.pr_url, '_blank');
+                window.open(data.pr_url, '_blank', 'noopener,noreferrer');
             }
         } else {
             if (typeof DebuggerConsole !== 'undefined') {
