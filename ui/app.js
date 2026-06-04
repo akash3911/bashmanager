@@ -887,6 +887,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     bindEvents();
     initResizers();
     await restoreSession();
+    applyTerminalDensity();
 
     // Initialize auto-scroll as enabled for terminal 1
     state.autoScroll[1] = true;
@@ -2498,6 +2499,35 @@ function updateAutoScrollBtn(termId, isOn) {
     persistWorkspace();
 }
 
+const TERMINAL_DENSITIES = ['compact', 'normal', 'relaxed'];
+
+function getTerminalDensity() {
+    const savedDensity = localStorage.getItem('terminalLineDensity');
+    return TERMINAL_DENSITIES.includes(savedDensity) ? savedDensity : 'normal';
+}
+
+function applyTerminalDensity(density = getTerminalDensity()) {
+    const safeDensity = TERMINAL_DENSITIES.includes(density) ? density : 'normal';
+
+    document.querySelectorAll('.cli-body').forEach(body => {
+        TERMINAL_DENSITIES.forEach(option => body.classList.remove(`terminal-density-${option}`));
+        body.classList.add(`terminal-density-${safeDensity}`);
+    });
+
+    document.querySelectorAll('.density-option').forEach(button => {
+        const active = button.dataset.density === safeDensity;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+    });
+}
+
+function setTerminalDensity(density) {
+    if (!TERMINAL_DENSITIES.includes(density)) return;
+    localStorage.setItem('terminalLineDensity', density);
+    applyTerminalDensity(density);
+    notify(`Terminal density set to ${density}.`, 'info');
+}
+
 function clearCli() {
     const termBody = getTerminalBody(state.activeTerminalId);
     if (termBody) {
@@ -2746,6 +2776,7 @@ function addTerminal() {
     bodyContainer.innerHTML = '<div class="cli-welcome"><span class="cli-prompt">$</span> <span class="cli-welcome-text">Terminal ready.</span></div>';
 
     document.getElementById('cli-area').insertBefore(bodyContainer, document.querySelector('.cli-input-bar'));
+    applyTerminalDensity();
     switchTerminal(id);
     persistWorkspace();
     saveSessionDebounced();
@@ -3394,6 +3425,16 @@ function bindEvents() {
         btnAutoscroll.addEventListener('click', toggleAutoScroll);
         // Set initial visual state (auto-scroll on by default)
         updateAutoScrollBtn(state.activeTerminalId, true);
+    }
+
+    const densityControl = document.getElementById('terminal-density-control');
+    if (densityControl) {
+        densityControl.addEventListener('click', (event) => {
+            const button = event.target.closest('.density-option');
+            if (button?.dataset.density) {
+                setTerminalDensity(button.dataset.density);
+            }
+        });
     }
 
     // Search
