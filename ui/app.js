@@ -2932,8 +2932,8 @@ function renderSidebar() {
         const isExpanded = state.expandedCategories.has(cat) || !!query;
 
         html += `
-            <div class="category-section" data-category="${cat}">
-                <div class="category-header" role="button" tabindex="0" aria-expanded="${isExpanded}" onclick="toggleCategory('${cat}')" onkeydown="handleKeyboardAction(event, () => toggleCategory('${cat}'))">
+            <div class="category-section" data-category="${escapeAttr(cat)}">
+                <div class="category-header" role="button" tabindex="0" aria-expanded="${isExpanded}" data-sidebar-action="toggle-category" data-category="${escapeAttr(cat)}">
                     <span class="category-arrow ${isExpanded ? 'expanded' : ''}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                     </span>
@@ -2948,8 +2948,8 @@ function renderSidebar() {
 
             return `
                         <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}" role="button" tabindex="0"
-                            onclick="selectScript('${s.relative_path}')"
-                            onkeydown="handleKeyboardAction(event, () => selectScript('${s.relative_path}'))"
+                            data-sidebar-action="select-script"
+                            data-script-path="${escapeAttr(s.relative_path)}"
                             title="${escapeAttr(s.desc)}"
                             data-file="${escapeAttr(s.file)}"
                             data-path="${escapeAttr(s.relative_path)}"
@@ -2959,7 +2959,11 @@ function renderSidebar() {
                             <span class="script-item-icon" style="${s.locked ? 'display:none;' : ''}">${ICONS.script}</span>
                             <span class="script-item-name">${escapeHtml(displayName)}</span>
                             <span class="script-item-fav ${s.favorite ? 'visible' : ''}"
-                                  onclick="event.stopPropagation(); toggleFavorite('${s.relative_path}')">
+                                  role="button"
+                                  tabindex="0"
+                                  aria-label="Toggle favorite"
+                                  data-sidebar-action="toggle-favorite"
+                                  data-script-path="${escapeAttr(s.relative_path)}">
                                 ${ICONS.favorite}
                             </span>
                         </li>
@@ -2979,7 +2983,7 @@ function renderSidebar() {
 
     tree.innerHTML = safeHTML(`
         <div class="root-folder">
-            <div class="category-header root-header" role="button" tabindex="0" aria-expanded="${rootExpanded}" onclick="toggleRoot()" onkeydown="handleKeyboardAction(event, () => toggleRoot())">
+            <div class="category-header root-header" role="button" tabindex="0" aria-expanded="${rootExpanded}" data-sidebar-action="toggle-root">
                 <span class="category-arrow ${rootArrowClass}">
                     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                 </span>
@@ -3000,8 +3004,8 @@ function renderSidebar() {
             const displayName = ((s.name || '') + '').trim() || s.file || (s.relative_path || '').split('/').pop() || '';
             return `
             <li class="script-item ${state.activeScript === s.relative_path ? 'active' : ''}" role="button" tabindex="0"
-                onclick="selectScript('${s.relative_path}')"
-                onkeydown="handleKeyboardAction(event, () => selectScript('${s.relative_path}'))">
+                data-sidebar-action="select-script"
+                data-script-path="${escapeAttr(s.relative_path)}">
                 <span class="script-item-icon" style="color: var(--accent-yellow); stroke: var(--accent-yellow);">${ICONS.favorite}</span>
                 <span class="script-item-name">${escapeHtml(displayName)}</span>
             </li>
@@ -3191,6 +3195,45 @@ function toggleCategory(cat) {
 function toggleRoot() {
     state.expandedRoot = !state.expandedRoot;
     renderSidebar();
+}
+
+function handleSidebarAction(event) {
+    const target = event.target.closest('[data-sidebar-action]');
+    if (!target) return;
+
+    const sidebarHost = event.currentTarget;
+    if (sidebarHost && !sidebarHost.contains(target)) return;
+
+    const action = target.dataset.sidebarAction;
+    if (action === 'toggle-favorite') {
+        event.stopPropagation();
+        if (target.dataset.scriptPath) toggleFavorite(target.dataset.scriptPath);
+        return;
+    }
+
+    if (action === 'select-script' && target.dataset.scriptPath) {
+        selectScript(target.dataset.scriptPath);
+        return;
+    }
+
+    if (action === 'toggle-category' && target.dataset.category) {
+        toggleCategory(target.dataset.category);
+        return;
+    }
+
+    if (action === 'toggle-root') {
+        toggleRoot();
+    }
+}
+
+function handleSidebarKeydown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+
+    const target = event.target.closest('[data-sidebar-action]');
+    if (!target) return;
+
+    event.preventDefault();
+    handleSidebarAction(event);
 }
 
 function handleKeyboardAction(event, callback) {
@@ -3443,6 +3486,18 @@ function bindEvents() {
         state.searchQuery = e.target.value;
         renderSidebar();
     });
+
+    const categoryTree = document.getElementById('category-tree');
+    if (categoryTree) {
+        categoryTree.addEventListener('click', handleSidebarAction);
+        categoryTree.addEventListener('keydown', handleSidebarKeydown);
+    }
+
+    const favoritesList = document.getElementById('favorites-list');
+    if (favoritesList) {
+        favoritesList.addEventListener('click', handleSidebarAction);
+        favoritesList.addEventListener('keydown', handleSidebarKeydown);
+    }
 
     // CLI input
     const cliInput = document.getElementById('cli-input');
