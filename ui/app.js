@@ -19,7 +19,9 @@ const API = {
     pr: '/api/git/pr',
     history: '/api/history',
     history_export: '/api/history/export',
+    history_clear: '/api/history/clear',
     kill: '/api/scripts/kill',
+    command_history_clear: '/api/command_history/clear',
     reliability_summary: '/api/reliability/summary',
     reliability_failures: '/api/reliability/failures',
     reliability_trends: '/api/reliability/trends',
@@ -3624,9 +3626,9 @@ function bindEvents() {
     const historyOverlay = document.getElementById('history-modal-overlay');
     const historyClose = document.getElementById('history-modal-close');
     const historySearch = document.getElementById('history-search');
-    const historyFilters = document.querySelectorAll('.history-filter');
     const historyExportTxt = document.getElementById('history-export-txt');
     const historyExportLog = document.getElementById('history-export-log');
+    const btnClearHistory = document.getElementById('btn-clear-history');
 
     if (historyClose) historyClose.addEventListener('click', closeHistoryViewer);
     if (historyOverlay) {
@@ -3651,31 +3653,49 @@ function bindEvents() {
     if (historyExportTxt) historyExportTxt.addEventListener('click', () => exportExecutionHistory('txt'));
     if (historyExportLog) historyExportLog.addEventListener('click', () => exportExecutionHistory('log'));
 
+
     const historyClearBtn = document.getElementById('history-clear-btn');
     if (historyClearBtn) {
         historyClearBtn.addEventListener('click', async () => {
-            const confirmation = confirm('Are you sure you want to permanently clear your command history log?');
+            const confirmation = confirm('Are you sure you want to permanently clear your command and execution history? This will delete all script and command run logs, and reset CLI command history. This action cannot be undone.');
             if (!confirmation) return;
 
             try {
-                const response = await fetch('/api/command_history/clear', {
+                // Clear command history
+                const cmdRes = await fetch(API.command_history_clear, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
-                const result = await response.json();
+                const cmdResult = await cmdRes.json();
 
-                if (result.success) {
-                    const targetDisplayList = document.getElementById('history-list');
-                    if (targetDisplayList) {
-                        targetDisplayList.innerHTML = '<div class="history-empty-state">Command history cleared successfully.</div>';
-                    }
-                    const targetSummaryWidget = document.getElementById('history-summary');
-                    if (targetSummaryWidget) {
-                        targetSummaryWidget.innerHTML = '';
-                    }
-                    notify('Command history cleared successfully!', 'success');
+                // Clear execution history
+                const execRes = await fetch(API.history_clear, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const execResult = await execRes.json();
+
+                if (cmdResult.success && execResult.success) {
+                    // Reset client-side state
+                    state.cmdHistory = [];
+                    state.cmdHistoryIndex = -1;
+                    state.historyEntries = [];
+                    state.historySummary = {
+                        total: 0,
+                        failed: 0,
+                        successful: 0,
+                        scripts: 0,
+                        commands: 0
+                    };
+
+                    // Re-render components
+                    renderHistorySummary(state.historySummary);
+                    renderHistoryEntries(state.historyEntries);
+
+                    notify('Command and execution history cleared successfully!', 'success');
                 } else {
-                    notify('Server failed to clear history: ' + (result.error || 'Unknown error'), 'error');
+                    const errMsg = (cmdResult.error || execResult.error || 'Unknown error');
+                    notify('Server failed to clear history: ' + errMsg, 'error');
                 }
             } catch (err) {
                 console.error('Error clearing history:', err);

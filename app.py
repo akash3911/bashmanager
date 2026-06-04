@@ -2398,7 +2398,9 @@ def parse_script_metadata(filepath):
             for line in f:
                 line = line.strip()
                 if line.startswith("# name:"):
-                    metadata["name"] = line[7:].strip()
+                    name_val = line[7:].strip()
+                    if name_val:
+                        metadata["name"] = name_val
                 elif line.startswith("# desc:"):
                     metadata["desc"] = line[7:].strip()
                 elif line.startswith("# tag:"):
@@ -2554,6 +2556,31 @@ def clear_history():
             pass
         with open(FAILED_HISTORY_FILE, 'w', encoding='utf-8') as f:
             pass
+
+        # Clear execution logs
+        if os.path.exists(EXECUTION_LOG_DIR):
+            for filename in os.listdir(EXECUTION_LOG_DIR):
+                file_path = os.path.join(EXECUTION_LOG_DIR, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception:
+                    pass
+
+        # Clear session logs
+        if os.path.exists(SESSION_LOG_DIR):
+            for filename in os.listdir(SESSION_LOG_DIR):
+                file_path = os.path.join(SESSION_LOG_DIR, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception:
+                    pass
+
         return jsonify({
             'success': True,
             'message': 'Execution history cleared successfully'
